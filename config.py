@@ -9,8 +9,23 @@ import torch
 from transformers import BitsAndBytesConfig, TrainingArguments
 from peft import LoraConfig, TaskType
 
+import os
+
 # ── Model & Tokenizer ────────────────────────────────────────────────────────
-MODEL_ID = "mistralai/Mistral-7B-Instruct-v0.2"
+# If you hit HuggingFace quotas, gated access limits, or are on a FREE Colab tier,
+# set USE_FREE_LLM="1" to use a completely open, ungated model.
+USE_FREE_LLM = os.environ.get("USE_FREE_LLM", "0")
+
+if USE_FREE_LLM == "1":
+    # TinyLlama fits perfectly on free Colab T4 GPUs and needs NO HuggingFace token
+    MODEL_ID = "TinyLlama/TinyLlama-1.1B-Chat-v1.0" 
+elif USE_FREE_LLM == "2":
+    # Zephyr is an ungated Mistral-7B equivalent (needs NO token, but requires 16GB VRAM)
+    MODEL_ID = "HuggingFaceH4/zephyr-7b-beta"
+else:
+    # Requires HF token and gated access approval on HuggingFace
+    MODEL_ID = "mistralai/Mistral-7B-Instruct-v0.2"
+
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 # ── Quantization (4-bit QLoRA) ───────────────────────────────────────────────
