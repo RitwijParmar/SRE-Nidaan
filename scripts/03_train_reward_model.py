@@ -24,19 +24,23 @@ def main():
     # Load dataset
     with open("data/sre_nidaan_dataset.json", "r") as f:
         dataset = json.load(f)
+    
+    if getattr(config, "FAST_LOCAL_TEST", False):
+        dataset = dataset[:10]
 
     # Load SFT model as base for reward model
+    sft_tokenizer = AutoTokenizer.from_pretrained(
+        config.SFT_TRAINING_ARGS.output_dir
+    )
     base_model = AutoModelForCausalLM.from_pretrained(
         config.MODEL_ID,
         quantization_config=config.BNB_CONFIG,
         device_map="auto",
         trust_remote_code=True,
     )
+    base_model.resize_token_embeddings(len(sft_tokenizer))
     sft_model = PeftModel.from_pretrained(
         base_model, config.SFT_TRAINING_ARGS.output_dir
-    )
-    sft_tokenizer = AutoTokenizer.from_pretrained(
-        config.SFT_TRAINING_ARGS.output_dir
     )
 
     os.makedirs("results", exist_ok=True)
