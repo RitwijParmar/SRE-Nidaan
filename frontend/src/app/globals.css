@@ -1,0 +1,117 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap");
+
+:root {
+  --nidaan-bg: #0a0e1a;
+  --nidaan-surface: #111827;
+  --nidaan-accent: #3b82f6;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  background: var(--nidaan-bg);
+  color: #e2e8f0;
+  font-family: "Inter", system-ui, sans-serif;
+  overflow-x: hidden;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #0a0e1a;
+}
+::-webkit-scrollbar-thumb {
+  background: #1e293b;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}
+
+/* React Flow overrides for dark theme */
+.react-flow__background {
+  background: transparent !important;
+}
+.react-flow__minimap {
+  background: #111827 !important;
+  border: 1px solid #1e293b !important;
+  border-radius: 8px !important;
+}
+.react-flow__controls {
+  background: #1a2235 !important;
+  border: 1px solid #1e293b !important;
+  border-radius: 8px !important;
+}
+.react-flow__controls-button {
+  background: #1a2235 !important;
+  border-color: #1e293b !important;
+  fill: #94a3b8 !important;
+}
+.react-flow__controls-button:hover {
+  background: #243049 !important;
+  fill: #e2e8f0 !important;
+}
+
+/* Animated edge glow */
+.react-flow__edge-path {
+  stroke: #3b82f6 !important;
+  stroke-width: 2 !important;
+}
+.react-flow__edge.animated .react-flow__edge-path {
+  stroke-dasharray: 5;
+  animation: edgeDash 1s linear infinite;
+}
+
+@keyframes edgeDash {
+  to {
+    stroke-dashoffset: -10;
+  }
+}
+
+/* Status indicator pulse */
+@keyframes statusPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.status-critical {
+  animation: statusPulse 1.5s ease-in-out infinite;
+}
+
+/* Glass card */
+.glass-card {
+  background: rgba(26, 34, 53, 0.6);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(30, 41, 59, 0.8);
+  border-radius: 12px;
+}
+
+/* Danger button glow */
+.btn-danger-glow {
+  box-shadow: 0 0 15px rgba(239, 68, 68, 0.3);
+  transition: all 0.3s ease;
+}
+.btn-danger-glow:hover {
+  box-shadow: 0 0 30px rgba(239, 68, 68, 0.5);
+  transform: translateY(-1px);
+}
+
+/* Metric value flash */
+@keyframes metricFlash {
+  0% { color: #f87171; }
+  50% { color: #fbbf24; }
+  100% { color: #f87171; }
+}
+.metric-flash {
+  animation: metricFlash 2s ease-in-out infinite;
+}
