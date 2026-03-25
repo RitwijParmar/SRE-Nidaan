@@ -1,0 +1,59 @@
+# ── SRE-Nidaan Orchestration ──
+version: '3.8'
+
+services:
+  face:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8001
+    depends_on:
+      - body
+    networks:
+      - sre-network
+
+  body:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    ports:
+      - "8001:8001"
+    environment:
+      - VLLM_ENDPOINT=http://brain:8000/v1
+    depends_on:
+      - brain
+    networks:
+      - sre-network
+
+  brain:
+    image: vllm/vllm-openai:latest
+    ports:
+      - "8000:8000"
+    environment:
+      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN:-}
+    command: >-
+      --model mistralai/Mistral-7B-Instruct-v0.2
+      --enable-lora
+      --max-lora-rank 64
+      --lora-modules sre-lora=/models/sft_model
+      --max-model-len 2048
+      --gpu-memory-utilization 0.90
+    volumes:
+      - ./results/sft_model:/models/sft_model
+      - ~/.cache/huggingface:/root/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks:
+      - sre-network
+
+networks:
+  sre-network:
+    driver: bridge

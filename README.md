@@ -166,27 +166,37 @@ python scripts/04_run_rlhf.py
 python scripts/05_run_evaluation.py
 ```
 
-### 3. Inference Server (The Brain)
+### 3. Native Local Execution
 
+If you prefer not to use Docker, you can run the services natively:
+
+**The Brain (vLLM inference via ngrok)**
 ```bash
 export NGROK_AUTHTOKEN="your-token"
 python inference_server.py
 ```
 
-### 4. Backend (The Body)
-
+**The Body (FastAPI Backend)**
 ```bash
 export VLLM_ENDPOINT="http://localhost:8000/v1"
 cd backend && uvicorn main:app --port 8001 --reload
 ```
 
-### 5. Frontend (The Face)
-
+**The Face (Next.js Frontend)**
 ```bash
 cd frontend && npm install && npm run dev
 ```
 
-Open **http://localhost:3000** ← Dark-mode SRE dashboard with causal DAG visualization.
+### 4. Docker Deployment (Recommended for Production)
+
+SRE-Nidaan is fully containerized. You can launch the entire 3-tier distributed system with a single command:
+
+```bash
+# Ensure you have nvidia-docker installed if you want The Brain to use your local GPU
+export HF_TOKEN="your_huggingface_token"
+docker-compose up --build -d
+```
+*This will spin up The Face on port 3000, The Body on port 8001, and The Brain (vLLM) on port 8000.*
 
 ---
 
