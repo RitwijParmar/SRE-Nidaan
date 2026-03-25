@@ -468,15 +468,21 @@ class SREDatasetGenerator:
         print(f"🏗️  Generating {num_examples} SRE causal incident examples...")
         all_examples = []
 
+        # Calculate examples per template for even distribution
+        total_templates = sum(len(t) for t in self.templates.values())
+        examples_per_template = max(num_examples // total_templates, 50)
+
         for domain, templates in self.templates.items():
             for template in templates:
                 params = template["params"]
                 keys = list(params.keys())
-                # Get all parameter value lists
-                value_lists = [params[k] for k in keys]
-                # Generate all combinations
-                for combo_values in product(*value_lists):
-                    param_combo = dict(zip(keys, combo_values))
+
+                # Random sampling instead of full combinatorial expansion
+                # (some templates have 10+ params × 3 values = millions of combos)
+                for _ in range(examples_per_template):
+                    param_combo = {
+                        k: random.choice(params[k]) for k in keys
+                    }
                     example = self._expand_template(domain, template, param_combo)
                     all_examples.append(example)
 
