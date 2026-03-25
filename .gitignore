@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+.env
+.env.local
+
+# Next.js
+.next/
+out/
+
+# vLLM / Model weights
+*.bin
+*.safetensors
+*.gguf
+nexus-causal-v3.1-lora/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
