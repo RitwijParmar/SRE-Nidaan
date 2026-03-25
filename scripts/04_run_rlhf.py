@@ -26,19 +26,22 @@ def main():
     # Load dataset
     with open("data/sre_nidaan_dataset.json", "r") as f:
         dataset = json.load(f)
+    if getattr(config, "FAST_LOCAL_TEST", False):
+        dataset = dataset[:10]
 
     # Load policy model (SFT checkpoint)
+    tokenizer = AutoTokenizer.from_pretrained(
+        config.SFT_TRAINING_ARGS.output_dir
+    )
     policy_base = AutoModelForCausalLM.from_pretrained(
         config.MODEL_ID,
         quantization_config=config.BNB_CONFIG,
         device_map="auto",
         trust_remote_code=True,
     )
+    policy_base.resize_token_embeddings(len(tokenizer))
     policy_model = PeftModel.from_pretrained(
         policy_base, config.SFT_TRAINING_ARGS.output_dir
-    )
-    tokenizer = AutoTokenizer.from_pretrained(
-        config.SFT_TRAINING_ARGS.output_dir
     )
 
     # Load reward model
@@ -48,6 +51,7 @@ def main():
         device_map="auto",
         trust_remote_code=True,
     )
+    reward_base.resize_token_embeddings(len(tokenizer))
     reward_sft = PeftModel.from_pretrained(
         reward_base, config.SFT_TRAINING_ARGS.output_dir
     )
