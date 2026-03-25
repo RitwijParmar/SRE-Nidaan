@@ -21,18 +21,22 @@ def main():
     print("  SRE-Nidaan — Phase 5: Final Model Evaluation")
     print("=" * 60)
 
-    # Load final RLHF model
+    # Local test memory limits cause RLHF to fail, so evaluate the SFT model instead
+    model_dir = config.SFT_TRAINING_ARGS.output_dir if getattr(config, "FAST_LOCAL_TEST", False) else "./results/final_rlhf_model"
+    
+    # Load model
+    final_tokenizer = AutoTokenizer.from_pretrained(
+        model_dir if os.path.exists(model_dir) else config.SFT_TRAINING_ARGS.output_dir
+    )
     base_model = AutoModelForCausalLM.from_pretrained(
         config.MODEL_ID,
         quantization_config=config.BNB_CONFIG,
         device_map="auto",
         trust_remote_code=True,
     )
+    base_model.resize_token_embeddings(len(final_tokenizer))
     final_model = PeftModel.from_pretrained(
-        base_model, "./results/final_rlhf_model"
-    )
-    final_tokenizer = AutoTokenizer.from_pretrained(
-        "./results/final_rlhf_model"
+        base_model, model_dir
     )
 
     os.makedirs("results", exist_ok=True)
