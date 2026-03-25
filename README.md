@@ -131,6 +131,12 @@ SRE-Nidaan/
 - **NVIDIA GPU with ≥16 GB VRAM** (for training; Phases 2–3 backend/frontend work on CPU)
 - **Node.js 18+** (for frontend)
 
+> [!TIP]
+> **HuggingFace Quota or Free Colab Tier?**
+> If you hit gated access limits for Mistral-7B or are running on the free Colab T4 tier, set the `USE_FREE_LLM` environment variable in `config.py` or your terminal:
+> - `export USE_FREE_LLM="1"` -> **TinyLlama-1.1B** (Requires 0 HF token, fits perfectly on free Colab)
+> - `export USE_FREE_LLM="2"` -> **Zephyr-7B-Beta** (Ungated Mistral-7B equivalent, still needs 16GB VRAM)
+
 ### 1. Clone & Install
 
 ```bash
