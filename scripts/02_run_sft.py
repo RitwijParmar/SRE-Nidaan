@@ -24,6 +24,9 @@ def main():
     # Load dataset
     with open("data/sre_nidaan_dataset.json", "r") as f:
         dataset = json.load(f)
+    
+    if getattr(config, "FAST_LOCAL_TEST", False):
+        dataset = dataset[:10]
 
     train_data, _ = train_test_split(dataset, test_size=0.15, random_state=42)
     print(f"📊 Using {len(train_data)} examples for SFT.")
