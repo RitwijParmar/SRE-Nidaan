@@ -25,7 +25,7 @@ elif USE_FREE_LLM == "2":
     MODEL_ID = "HuggingFaceH4/zephyr-7b-beta"
 else:
     # Requires HF token and gated access approval on HuggingFace
-    MODEL_ID = "mistralai/Mistral-7B-Instruct-v0.2"
+    MODEL_ID = "meta-llama/Meta-Llama-3-8B-Instruct"
 
 if torch.cuda.is_available():
     DEVICE = "cuda"
@@ -64,7 +64,7 @@ LORA_CONFIG = LoraConfig(
 # ── SFT Training Arguments ──────────────────────────────────────────────────
 SFT_TRAINING_ARGS = TrainingArguments(
     output_dir="./results/sft_model",
-    num_train_epochs=1 if FAST_LOCAL_TEST else 4,
+    num_train_epochs=1 if FAST_LOCAL_TEST else 10,
     per_device_train_batch_size=1 if FAST_LOCAL_TEST else 2,
     gradient_accumulation_steps=1 if FAST_LOCAL_TEST else 4,
     optim="adamw_torch" if FAST_LOCAL_TEST else "paged_adamw_32bit", # Paged optimizers are CUDA only
@@ -86,11 +86,11 @@ REWARD_MODEL_EPOCHS = 1 if FAST_LOCAL_TEST else 3
 REWARD_MODEL_LR = 5e-5
 
 # ── RLHF Training ───────────────────────────────────────────────────────────
-RLHF_ITERATIONS = 2 if FAST_LOCAL_TEST else 100
+RLHF_ITERATIONS = 2 if FAST_LOCAL_TEST else 500
 RLHF_LR = 1e-5
 
 # ── SRE-Specific Configuration ──────────────────────────────────────────────
-SRE_DATASET_SIZE = 2500           # Massive dataset for SRE causal scenarios
+SRE_DATASET_SIZE = 10000          # Scaled up for production SRE causal scenarios
 SRE_DOMAINS = [
     "kubernetes", "database", "networking",
     "load_balancer", "dns", "storage",
