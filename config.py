@@ -64,7 +64,7 @@ LORA_CONFIG = LoraConfig(
 # ── SFT Training Arguments ──────────────────────────────────────────────────
 SFT_TRAINING_ARGS = TrainingArguments(
     output_dir="./results/sft_model",
-    num_train_epochs=1 if FAST_LOCAL_TEST else 2,
+    num_train_epochs=1 if FAST_LOCAL_TEST else 4,
     per_device_train_batch_size=1 if FAST_LOCAL_TEST else 2,
     gradient_accumulation_steps=1 if FAST_LOCAL_TEST else 4,
     optim="adamw_torch" if FAST_LOCAL_TEST else "paged_adamw_32bit", # Paged optimizers are CUDA only
@@ -82,11 +82,11 @@ SFT_TRAINING_ARGS = TrainingArguments(
 )
 
 # ── Reward Model Training ───────────────────────────────────────────────────
-REWARD_MODEL_EPOCHS = 1 if FAST_LOCAL_TEST else 2
+REWARD_MODEL_EPOCHS = 1 if FAST_LOCAL_TEST else 3
 REWARD_MODEL_LR = 5e-5
 
 # ── RLHF Training ───────────────────────────────────────────────────────────
-RLHF_ITERATIONS = 2 if FAST_LOCAL_TEST else 15
+RLHF_ITERATIONS = 2 if FAST_LOCAL_TEST else 100
 RLHF_LR = 1e-5
 
 # ── SRE-Specific Configuration ──────────────────────────────────────────────
