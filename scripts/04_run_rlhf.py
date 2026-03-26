@@ -41,7 +41,7 @@ def main():
     )
     policy_base.resize_token_embeddings(len(tokenizer))
     policy_model = PeftModel.from_pretrained(
-        policy_base, config.SFT_TRAINING_ARGS.output_dir
+        policy_base, config.SFT_TRAINING_ARGS.output_dir, is_trainable=True
     )
 
     # Load reward model
