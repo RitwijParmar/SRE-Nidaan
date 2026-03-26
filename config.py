@@ -12,20 +12,10 @@ from peft import LoraConfig, TaskType
 import os
 
 # ── Model & Tokenizer ────────────────────────────────────────────────────────
-# If you hit HuggingFace quotas, gated access limits, or are on a FREE Colab tier,
-# set USE_FREE_LLM="1" to use a completely open, ungated model.
-USE_FREE_LLM = os.environ.get("USE_FREE_LLM", "1") # Defaulting to TinyLlama for local Mac runs
 FAST_LOCAL_TEST = os.environ.get("FAST_LOCAL_TEST", "1") == "1"
 
-if USE_FREE_LLM == "1":
-    # TinyLlama fits perfectly on free Colab T4 GPUs and needs NO HuggingFace token
-    MODEL_ID = "TinyLlama/TinyLlama-1.1B-Chat-v1.0" 
-elif USE_FREE_LLM == "2":
-    # Zephyr is an ungated Mistral-7B equivalent (needs NO token, but requires 16GB VRAM)
-    MODEL_ID = "HuggingFaceH4/zephyr-7b-beta"
-else:
-    # Requires HF token and gated access approval on HuggingFace
-    MODEL_ID = "meta-llama/Meta-Llama-3-8B-Instruct"
+# Automatically enforce strict production model per user request
+MODEL_ID = "meta-llama/Meta-Llama-3-8B-Instruct"
 
 if torch.cuda.is_available():
     DEVICE = "cuda"
