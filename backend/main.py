@@ -58,6 +58,8 @@ MODEL_ID = os.environ.get("MODEL_ID", "meta-llama/Meta-Llama-3-8B-Instruct")
 PRODUCTION_ARTIFACT_LABEL = os.environ.get(
     "PRODUCTION_ARTIFACT_LABEL", "checkpoint-1064"
 )
+VLLM_REQUEST_TIMEOUT_SECONDS = float(os.environ.get("VLLM_REQUEST_TIMEOUT_SECONDS", "12"))
+VLLM_MAX_RETRIES = _env_int("VLLM_MAX_RETRIES", 1, 0, 5)
 GROUNDING_KB_PATH = os.environ.get(
     "GROUNDING_KB_PATH", str(ROOT_DIR / "ops" / "knowledge_base.json")
 )
@@ -423,7 +425,12 @@ async def _generate_candidate_analyses(
     return parsed_candidates
 
 
-client = AsyncOpenAI(base_url=VLLM_ENDPOINT, api_key=VLLM_API_KEY)
+client = AsyncOpenAI(
+    base_url=VLLM_ENDPOINT,
+    api_key=VLLM_API_KEY,
+    timeout=VLLM_REQUEST_TIMEOUT_SECONDS,
+    max_retries=VLLM_MAX_RETRIES,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -581,6 +588,8 @@ async def health() -> dict[str, Any]:
         "artifact_label": PRODUCTION_ARTIFACT_LABEL,
         "knowledge_base_path": GROUNDING_KB_PATH,
         "default_candidate_count": DEFAULT_CANDIDATE_COUNT,
+        "vllm_request_timeout_seconds": VLLM_REQUEST_TIMEOUT_SECONDS,
+        "vllm_max_retries": VLLM_MAX_RETRIES,
     }
 
 

@@ -89,7 +89,7 @@ BRAIN_URL="$("$GCLOUD_BIN" run services describe sre-nidaan-brain --region "$REG
   --memory 1Gi \
   --max-instances 5 \
   --timeout 300 \
-  --set-env-vars "VLLM_ENDPOINT=${BRAIN_URL}/v1,MODEL_ID=${MODEL_ID},PRODUCTION_ARTIFACT_LABEL=${PRODUCTION_ARTIFACT_LABEL},GENERATION_CANDIDATES=3"
+  --set-env-vars "VLLM_ENDPOINT=${BRAIN_URL}/v1,MODEL_ID=${MODEL_ID},PRODUCTION_ARTIFACT_LABEL=${PRODUCTION_ARTIFACT_LABEL},GENERATION_CANDIDATES=3,VLLM_REQUEST_TIMEOUT_SECONDS=12,VLLM_MAX_RETRIES=1"
 
 BODY_URL="$("$GCLOUD_BIN" run services describe sre-nidaan-body --region "$REGION" --format='value(status.url)')"
 
