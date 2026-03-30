@@ -3,7 +3,7 @@ SRE-Nidaan: Supervised Fine-Tuning (SFT) Trainer
 ==================================================
 Phase 1 of the NEXUS-CAUSAL SRE training pipeline.
 Teaches the model the structure, vocabulary, and format of SRE causal analysis
-using QLoRA on Mistral-7B-Instruct-v0.2.
+using QLoRA on the configured instruct model.
 
 Mirrors NEXUS-CAUSAL v3.1 src/training/sft_trainer.py with SRE-specific
 special tokens and incident-domain instruction formatting.
@@ -13,6 +13,9 @@ from typing import List, Dict
 from peft import prepare_model_for_kbit_training, get_peft_model
 from transformers import Trainer, DataCollatorForLanguageModeling
 from datasets import Dataset
+
+from src.utils.model_utils import build_training_example
+from src.utils.sre_schema import build_structured_training_response
 
 
 # SRE-specific causal reasoning tokens
@@ -36,11 +39,21 @@ class SRENexusSFT:
     instruction formatting and incident analysis tokens.
     """
 
-    def __init__(self, model, tokenizer, training_args, lora_config):
+    def __init__(
+        self,
+        model,
+        tokenizer,
+        training_args,
+        lora_config,
+        model_name=None,
+        strict_lexical_cues: bool = False,
+    ):
         self.model = model
         self.tokenizer = tokenizer
         self.training_args = training_args
         self.lora_config = lora_config
+        self.model_name = model_name or getattr(tokenizer, "name_or_path", "")
+        self.strict_lexical_cues = strict_lexical_cues
 
     def setup_special_tokens(self):
         """Adds SRE causal reasoning tokens to the tokenizer and resizes embeddings."""
@@ -59,10 +72,7 @@ class SRENexusSFT:
 
     def format_instruction_data(self, dataset: List[Dict]) -> List[Dict]:
         """
-        Formats raw SRE incident data into Mistral instruction format.
-
-        Each example is wrapped in <s>[INST] ... [/INST] ... </s> tags
-        following Mistral-7B-Instruct-v0.2 tokenizer requirements.
+        Formats raw SRE incident data into the active model's chat format.
         """
         formatted_data = []
         for ex in dataset:
@@ -80,31 +90,25 @@ class SRENexusSFT:
                 f"Identify the structural root cause, explain why the naive "
                 f"intervention is a confounding error, and produce a causal DAG."
             )
+            if self.strict_lexical_cues:
+                instruction += (
+                    "\nReturn the answer using [ROOT_CAUSE], [INTERVENTION], "
+                    "[COUNTERFACTUAL], [DAG], [REMEDIATION], and [SAFETY_CHECK]. "
+                    "Use explicit do(...), counterfactual, graph/node/edge, and "
+                    "human approval wording."
+                )
 
-            # Build the response with special tokens
-            dag_nodes = ex.get("dag_nodes", [])
-            dag_edges = ex.get("dag_edges", [])
-
-            nodes_str = " ".join(
-                f"[NODE] {n['id']}:{n['label']}" for n in dag_nodes
-            )
-            edges_str = " ".join(
-                f"[EDGE] {e['source']}->{e['target']}" for e in dag_edges
-            )
-
-            response = (
-                f"[DOMAIN] {domain}\n"
-                f"[PEARL_LEVEL] L{pearl_level}\n"
-                f"[ROOT_CAUSE] {ex.get('root_cause', '')}\n"
-                f"[INTERVENTION] {ex.get('confounding_action', '')}\n"
-                f"[COUNTERFACTUAL] {ex.get('counterfactual', '')}\n"
-                f"[DAG] {nodes_str} {edges_str}\n"
-                f"[REMEDIATION] {ex.get('correct_action', '')}\n"
-                f"[SAFETY_CHECK] requires_human_approval=true"
+            response = build_structured_training_response(
+                ex,
+                lexical_cues=self.strict_lexical_cues,
             )
 
-            # Mistral instruction format
-            formatted_text = f"<s>[INST] {instruction} [/INST]{response}</s>"
+            formatted_text = build_training_example(
+                instruction,
+                response,
+                model_name=self.model_name,
+                tokenizer=self.tokenizer,
+            )
             formatted_data.append({"text": formatted_text})
 
         return formatted_data
@@ -116,13 +120,18 @@ class SRENexusSFT:
         train_dataset = Dataset.from_list(train_formatted)
 
         def tokenize(ex):
-            out = self.tokenizer(
-                ex["text"], truncation=True, max_length=512
+            return self.tokenizer(
+                ex["text"],
+                truncation=True,
+                max_length=512,
+                return_attention_mask=True,
             )
-            out["labels"] = out["input_ids"].copy()
-            return out
 
-        tokenized_train_dataset = train_dataset.map(tokenize)
+        tokenized_train_dataset = train_dataset.map(
+            tokenize,
+            remove_columns=train_dataset.column_names,
+            desc="Tokenizing SFT dataset",
+        )
 
         trainer = Trainer(
             model=self.model,
