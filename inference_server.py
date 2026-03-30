@@ -2,7 +2,7 @@
 SRE-Nidaan: The Brain — vLLM Inference Server
 ================================================
 OpenAI-compatible inference endpoint serving the NEXUS-CAUSAL v3.1
-LoRA adapter on top of Mistral-7B-Instruct-v0.2.
+LoRA adapter on top of the configured instruct model.
 
 Designed for GPU execution (Colab / cloud VM with ≥16 GB VRAM).
 Exposes a public URL via pyngrok for split-compute integration.
@@ -22,6 +22,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from pyngrok import ngrok, conf as ngrok_conf
 
+from src.utils.model_utils import build_chat_prompt
+
 # ---------------------------------------------------------------------------
 # vLLM imports (deferred so the script still parses on CPU-only machines)
 # ---------------------------------------------------------------------------
@@ -37,7 +39,7 @@ except ImportError:
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-BASE_MODEL = "mistralai/Mistral-7B-Instruct-v0.2"
+BASE_MODEL = os.environ.get("MODEL_ID", "meta-llama/Meta-Llama-3-8B-Instruct")
 LORA_ADAPTER_PATH = os.environ.get(
     "NEXUS_LORA_PATH",
     "./nexus-causal-v3.1-lora",  # default local path
@@ -45,8 +47,8 @@ LORA_ADAPTER_PATH = os.environ.get(
 LORA_ADAPTER_NAME = "nexus-causal-v3.1"
 MAX_LORA_RANK = 64          # ← caps cudaMemcpyAsync during adapter swaps
 MAX_MODEL_LEN = 2048
-DTYPE = "half"
-QUANTIZATION = "awq"        # 4-bit quantization for memory efficiency
+DTYPE = os.environ.get("VLLM_DTYPE", "half")
+QUANTIZATION = os.environ.get("VLLM_QUANTIZATION") or None
 PORT = 8000
 
 logging.basicConfig(level=logging.INFO)
@@ -153,31 +155,17 @@ def resolve_lora(use_lora: bool) -> Optional[LoRARequest]:
 
 
 # ---------------------------------------------------------------------------
-# Mistral [INST] Prompt Formatter
+# Prompt Formatter
 # ---------------------------------------------------------------------------
 
-def format_mistral_prompt(messages: list[ChatMessage]) -> str:
-    """
-    Converts a list of chat messages into Mistral-7B-Instruct-v0.2 format.
-    Wraps system + user content inside [INST] / [/INST] tags.
-    """
-    system_parts: list[str] = []
-    conversation_parts: list[str] = []
-
-    for msg in messages:
-        if msg.role == "system":
-            system_parts.append(msg.content)
-        elif msg.role == "user":
-            user_block = msg.content
-            if system_parts:
-                # Prepend system context inside the first [INST] block
-                user_block = "\n".join(system_parts) + "\n\n" + user_block
-                system_parts.clear()
-            conversation_parts.append(f"<s>[INST] {user_block} [/INST]")
-        elif msg.role == "assistant":
-            conversation_parts.append(f" {msg.content}</s>")
-
-    return "".join(conversation_parts)
+def format_prompt(messages: list[ChatMessage]) -> str:
+    """Render chat turns using the active model's native prompt format."""
+    return build_chat_prompt(
+        [{"role": message.role, "content": message.content} for message in messages],
+        model_name=BASE_MODEL,
+        tokenizer=None,
+        add_generation_prompt=True,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -188,7 +176,7 @@ def format_mistral_prompt(messages: list[ChatMessage]) -> str:
 async def chat_completions(request: ChatCompletionRequest):
     """OpenAI-compatible chat completion endpoint with LoRA routing."""
 
-    prompt = format_mistral_prompt(request.messages)
+    prompt = format_prompt(request.messages)
 
     # ── Mock path (no GPU / vLLM) ──────────────────────────────────────
     if engine is None:

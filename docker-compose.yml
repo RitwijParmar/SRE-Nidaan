@@ -23,6 +23,7 @@ services:
       - "8001:8001"
     environment:
       - VLLM_ENDPOINT=http://brain:8000/v1
+      - MODEL_ID=${MODEL_ID:-meta-llama/Meta-Llama-3-8B-Instruct}
     depends_on:
       - brain
     networks:
@@ -34,8 +35,9 @@ services:
       - "8000:8000"
     environment:
       - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN:-}
+      - MODEL_ID=${MODEL_ID:-meta-llama/Meta-Llama-3-8B-Instruct}
     command: >-
-      --model mistralai/Mistral-7B-Instruct-v0.2
+      --model ${MODEL_ID:-meta-llama/Meta-Llama-3-8B-Instruct}
       --enable-lora
       --max-lora-rank 64
       --lora-modules sre-lora=/models/sft_model

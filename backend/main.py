@@ -13,7 +13,6 @@ import random
 import asyncio
 import logging
 from datetime import datetime, timezone
-from typing import Optional
 
 from fastapi import FastAPI, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,6 +24,7 @@ from openai import AsyncOpenAI
 # ---------------------------------------------------------------------------
 VLLM_ENDPOINT = os.environ.get("VLLM_ENDPOINT", "http://localhost:8000/v1")
 VLLM_API_KEY = os.environ.get("VLLM_API_KEY", "not-needed")  # vLLM doesn't require a key
+MODEL_ID = os.environ.get("MODEL_ID", "meta-llama/Meta-Llama-3-8B-Instruct")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("sre-nidaan-body")
@@ -123,7 +123,7 @@ def fetch_system_telemetry() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Mistral [INST] Prompt Builder
+# Prompt Builder
 # ---------------------------------------------------------------------------
 
 SYSTEM_PROMPT = """You are NEXUS-CAUSAL, an AI SRE agent trained on Pearl's Causal Hierarchy.
@@ -133,19 +133,16 @@ Explain why a naive intervention (e.g., scaling up auth_service) would WORSEN th
 Respond with a valid JSON object matching the provided schema EXACTLY."""
 
 
-def build_mistral_prompt(telemetry: dict) -> str:
+def build_analysis_user_content(telemetry: dict) -> str:
     """
-    Constructs a Mistral-7B-Instruct-v0.2 formatted prompt.
-    Uses [INST] / [/INST] token wrapping as required by the tokenizer.
-    Prompt is CONCISE — CausalCoT degrades performance to 41%.
+    Build the task payload for the model-facing user turn.
+    Prompt is concise because verbose chain-of-thought hurts this benchmark.
     """
-    user_content = f"""Telemetry Snapshot:
+    return f"""Telemetry Snapshot:
 {json.dumps(telemetry, indent=2)}
 
 Task: Apply do-calculus to identify the root cause and produce a causal DAG.
 Return ONLY the JSON object with: root_cause, intervention_simulation, recommended_action, dag_nodes, dag_edges."""
-
-    return f"<s>[INST] {SYSTEM_PROMPT}\n\n{user_content} [/INST]"
 
 
 # ---------------------------------------------------------------------------
@@ -269,7 +266,7 @@ async def analyze_incident(background_tasks: BackgroundTasks):
     
     Read-only copilot pattern:
     1. Fetch telemetry snapshot
-    2. Build Mistral-formatted prompt
+    2. Build structured prompt
     3. Call vLLM with Pydantic schema enforcement
     4. Return analysis with requires_human_approval: true
     5. Kick off refutation test in background
@@ -279,23 +276,17 @@ async def analyze_incident(background_tasks: BackgroundTasks):
     logger.info("Telemetry fetched: %s", json.dumps(telemetry, indent=2))
 
     # ── Step 2: Build prompt ───────────────────────────────────────────
-    prompt = build_mistral_prompt(telemetry)
+    user_content = build_analysis_user_content(telemetry)
 
     # ── Step 3: Call vLLM with structured output ───────────────────────
     try:
         response = await client.chat.completions.create(
-            model="mistralai/Mistral-7B-Instruct-v0.2",
+            model=MODEL_ID,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {
                     "role": "user",
-                    "content": (
-                        f"Telemetry Snapshot:\n{json.dumps(telemetry, indent=2)}\n\n"
-                        "Task: Apply do-calculus to identify the root cause and "
-                        "produce a causal DAG. Return ONLY the JSON object with: "
-                        "root_cause, intervention_simulation, recommended_action, "
-                        "dag_nodes, dag_edges."
-                    ),
+                    "content": user_content,
                 },
             ],
             temperature=0.1,
@@ -349,6 +340,7 @@ async def health():
         "service": "sre-nidaan-body",
         "safety_plane": "read-only-copilot",
         "vllm_endpoint": VLLM_ENDPOINT,
+        "model_id": MODEL_ID,
     }
 
 
