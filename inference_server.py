@@ -42,9 +42,9 @@ except ImportError:
 BASE_MODEL = os.environ.get("MODEL_ID", "meta-llama/Meta-Llama-3-8B-Instruct")
 LORA_ADAPTER_PATH = os.environ.get(
     "NEXUS_LORA_PATH",
-    "./nexus-causal-v3.1-lora",  # default local path
+    "./results/production_adapter",
 )
-LORA_ADAPTER_NAME = "nexus-causal-v3.1"
+LORA_ADAPTER_NAME = os.environ.get("NEXUS_LORA_NAME", "sre-nidaan-production")
 MAX_LORA_RANK = 64          # ← caps cudaMemcpyAsync during adapter swaps
 MAX_MODEL_LEN = 2048
 DTYPE = os.environ.get("VLLM_DTYPE", "half")

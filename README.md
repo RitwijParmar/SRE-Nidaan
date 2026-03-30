@@ -99,6 +99,9 @@ SRE-Nidaan/
 │   ├── 03_train_reward_model.py    # 7D reward model training
 │   ├── 04_run_rlhf.py             # Pearl's Ladder RLHF
 │   └── 05_run_evaluation.py       # Final model evaluation
+│   ├── 06_select_best_sft_checkpoint.py
+│   ├── 07_generate_structured_response.py
+│   └── 08_prepare_production_adapter.py
 ├── src/                            # Core library
 │   ├── data/
 │   │   └── dataset_generator.py    # Massive SRE dataset generator
@@ -108,8 +111,12 @@ SRE-Nidaan/
 │   │   └── rlhf_trainer.py         # Pearl's Ladder curriculum RLHF
 │   ├── evaluation/
 │   │   └── evaluator.py            # Multi-level evaluation framework
+│   ├── runtime/
+│   │   └── product_strategy.py     # Grounding retrieval + verifier + fallback
 │   └── utils/
 │       └── model_utils.py          # Model loading & prompt formatting
+├── ops/
+│   └── knowledge_base.json         # Runbooks, topology, and policy grounding docs
 ├── inference_server.py             # The Brain: vLLM + LoRA inference
 ├── backend/
 │   └── main.py                     # The Body: FastAPI + Safety Plane
@@ -177,6 +184,7 @@ If you prefer not to use Docker, you can run the services natively:
 ```bash
 export NGROK_AUTHTOKEN="your-token"
 export MODEL_ID="meta-llama/Meta-Llama-3-8B-Instruct"
+python scripts/08_prepare_production_adapter.py
 python inference_server.py
 ```
 
@@ -184,7 +192,8 @@ python inference_server.py
 ```bash
 export VLLM_ENDPOINT="http://localhost:8000/v1"
 export MODEL_ID="meta-llama/Meta-Llama-3-8B-Instruct"
-cd backend && uvicorn main:app --port 8001 --reload
+export PRODUCTION_ARTIFACT_LABEL="checkpoint-1064"
+uvicorn backend.main:app --port 8001 --reload
 ```
 
 **The Face (Next.js Frontend)**
@@ -194,15 +203,36 @@ cd frontend && npm install && npm run dev
 
 ### 4. Docker Deployment (Recommended for Production)
 
-SRE-Nidaan is fully containerized. You can launch the entire 3-tier distributed system with a single command:
+The production path intentionally serves the stable SFT baseline (`checkpoint-1064`) with grounding, verifier scoring, and analyst feedback capture in front of it. Prepare the adapter once, then launch the full 3-tier stack:
 
 ```bash
-# Ensure you have nvidia-docker installed if you want The Brain to use your local GPU
 export HF_TOKEN="your_huggingface_token"
 export MODEL_ID="meta-llama/Meta-Llama-3-8B-Instruct"
+python scripts/08_prepare_production_adapter.py
 docker-compose up --build -d
 ```
-*This will spin up The Face on port 3000, The Body on port 8001, and The Brain (vLLM) on port 8000.*
+This spins up:
+- The Face on `3000`
+- The Body on `8001`
+- The Brain on `8000`
+
+The backend will:
+- retrieve grounding evidence from `ops/knowledge_base.json`
+- generate multiple candidates from the base + LoRA path
+- verify telemetry/evidence overlap
+- fall back to a deterministic safe answer when candidates are too generic
+- log analyst feedback to `feedback/analyst_feedback.jsonl`
+
+### 5. Production Strategy
+
+This repo now treats RLHF as an optional research track, not the serving default. The deployed product path is:
+
+1. `checkpoint-1064` as the stable SFT baseline
+2. grounding retrieval over runbooks, topology, and policy docs
+3. candidate verification and safe fallback selection
+4. analyst feedback capture for future prompt-matched preference tuning
+
+If `results/sft_model/checkpoint-1064` is not present locally, `scripts/08_prepare_production_adapter.py` will try to pull the adapter from `ritwijar/SRE-Nidaan-Production` using your Hugging Face token.
 
 ---
 

@@ -24,6 +24,12 @@ services:
     environment:
       - VLLM_ENDPOINT=http://brain:8000/v1
       - MODEL_ID=${MODEL_ID:-meta-llama/Meta-Llama-3-8B-Instruct}
+      - GROUNDING_KB_PATH=/app/ops/knowledge_base.json
+      - FEEDBACK_LOG_PATH=/app/feedback/analyst_feedback.jsonl
+      - PRODUCTION_ARTIFACT_LABEL=${PRODUCTION_ARTIFACT_LABEL:-checkpoint-1064}
+      - GENERATION_CANDIDATES=${GENERATION_CANDIDATES:-3}
+    volumes:
+      - ./feedback:/app/feedback
     depends_on:
       - brain
     networks:
@@ -36,15 +42,16 @@ services:
     environment:
       - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN:-}
       - MODEL_ID=${MODEL_ID:-meta-llama/Meta-Llama-3-8B-Instruct}
+      - NEXUS_LORA_PATH=/models/production_adapter
     command: >-
       --model ${MODEL_ID:-meta-llama/Meta-Llama-3-8B-Instruct}
       --enable-lora
       --max-lora-rank 64
-      --lora-modules sre-lora=/models/sft_model
+      --lora-modules sre-lora=/models/production_adapter
       --max-model-len 2048
       --gpu-memory-utilization 0.90
     volumes:
-      - ./results/sft_model:/models/sft_model
+      - ./results/production_adapter:/models/production_adapter:ro
       - ~/.cache/huggingface:/root/.cache/huggingface
     deploy:
       resources:

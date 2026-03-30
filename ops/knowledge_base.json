@@ -1,0 +1,38 @@
+[
+  {
+    "id": "topology-auth-path",
+    "kind": "service_topology",
+    "title": "Frontend to auth to database request path",
+    "summary": "Frontend traffic fans into auth_service. auth_service holds persistent database connections. Database saturation cascades back to the frontend as 503s.",
+    "content": "Topology: frontend -> auth_service -> database. When auth_service retries pile up, each retry holds or opens another database connection. Customer-visible errors appear first at the frontend even when the structural bottleneck sits in the database layer.",
+    "keywords": ["frontend", "auth_service", "database", "503", "connections", "retry", "topology"],
+    "services": ["frontend", "auth_service", "database"]
+  },
+  {
+    "id": "runbook-db-connection-pool",
+    "kind": "runbook",
+    "title": "Connection pool exhaustion response",
+    "summary": "Symptoms: database connections near 100%, ClientRead or lock waits, rising auth latency. Preferred actions: rate limit, break retries, drain blocked sessions, then adjust max_connections carefully.",
+    "content": "Do not scale the upstream service first. Scaling upstream replicas increases connection demand and often worsens the outage. Break the retry loop, reduce request rate, inspect blocked sessions, and only then consider connection-pool or max_connections changes.",
+    "keywords": ["database", "connections", "ClientRead", "lock", "max_connections", "rate limit", "retry", "circuit breaker"],
+    "services": ["auth_service", "database"]
+  },
+  {
+    "id": "postmortem-panic-scaling-auth",
+    "kind": "postmortem",
+    "title": "Auth retry storm panic-scaling incident",
+    "summary": "Prior incident: scaling auth replicas during a DB saturation event increased open connections and caused a wider outage.",
+    "content": "Root cause was not CPU scarcity in auth_service. CPU only reflected retry amplification. The incorrect intervention was add replicas. The correct intervention was to stop retries, shed load, and recover the database before capacity changes.",
+    "keywords": ["panic scaling", "auth_service", "database", "retry storm", "replicas", "wrong intervention"],
+    "services": ["auth_service", "database"]
+  },
+  {
+    "id": "policy-human-approval",
+    "kind": "policy",
+    "title": "Human approval for blast-radius changes",
+    "summary": "Any action that changes capacity, limits, or DB settings requires manual review and explicit human approval.",
+    "content": "Mandatory policy: interventions with blast-radius risk must be routed through a human operator. Safe recommendations should mention manual review and avoid blindly scaling the affected tier.",
+    "keywords": ["manual review", "human approval", "blast radius", "policy", "capacity", "database"],
+    "services": ["frontend", "auth_service", "database"]
+  }
+]
