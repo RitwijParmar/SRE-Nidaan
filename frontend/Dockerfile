@@ -4,8 +4,8 @@ FROM node:18-alpine AS builder
 WORKDIR /app
 
 # Install dependencies
-COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci
+COPY frontend/package*.json ./
+RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
 # Copy application code
 COPY frontend/ .
@@ -20,7 +20,7 @@ WORKDIR /app
 
 # Copy built assets
 COPY --from=builder /app/package.json ./
-COPY --from=builder /app/package-lock.json ./
+COPY --from=builder /app/package-lock.json ./package-lock.json
 COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/node_modules ./node_modules
