@@ -69,7 +69,7 @@ FEEDBACK_LOG_PATH = os.environ.get(
 )
 DEFAULT_CANDIDATE_COUNT = _env_int("GENERATION_CANDIDATES", 3, 1, 8)
 DEFAULT_GROUNDING_LIMIT = _env_int("GROUNDING_EVIDENCE_LIMIT", 4, 1, 8)
-GENERATION_MAX_TOKENS = _env_int("GENERATION_MAX_TOKENS", 384, 96, 1024)
+GENERATION_MAX_TOKENS = _env_int("GENERATION_MAX_TOKENS", 512, 96, 1024)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("sre-nidaan-body")
@@ -231,6 +231,10 @@ SYSTEM_PROMPT = """You are NEXUS-CAUSAL, an AI SRE copilot using Pearl's Causal 
 Use the telemetry and grounding evidence to identify the structural bottleneck, not surface symptoms.
 Do not recommend panic scaling. If capacity or database changes are mentioned, require human approval.
 Use concrete service names, metrics, and retrieved evidence whenever possible.
+Be concise and deterministic.
+Return short strings, at most 4 dag_nodes, and at most 4 dag_edges.
+For dag_edges, use exactly these keys: id, source, target, animated.
+Do not use keys like from or to.
 Respond with a valid JSON object matching the provided schema exactly."""
 
 
@@ -254,7 +258,8 @@ def build_analysis_user_content(
         "1. Identify the structural root cause with telemetry-specific language.\n"
         "2. Explain why do(Scale Up Auth_Service) or similar upstream scaling can worsen the incident.\n"
         "3. Recommend the safest intervention and mention manual review or human approval for risky changes.\n"
-        "4. Produce a causal DAG with at least 3 nodes.\n\n"
+        "4. Produce a compact causal DAG with 3-4 nodes and 2-4 edges using short IDs.\n"
+        "5. Keep every field concise so the full JSON stays small.\n\n"
         "Return ONLY the JSON object with: root_cause, intervention_simulation, recommended_action, dag_nodes, dag_edges."
     )
 
