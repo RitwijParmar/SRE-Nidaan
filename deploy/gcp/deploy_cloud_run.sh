@@ -75,7 +75,7 @@ fi
   --min-instances 0 \
   --timeout 3600 \
   --startup-probe="${BRAIN_STARTUP_PROBE}" \
-  --set-env-vars "MODEL_ID=${MODEL_ID},HF_PRODUCTION_REPO_ID=${HF_PRODUCTION_REPO_ID},PRODUCTION_ARTIFACT_LABEL=${PRODUCTION_ARTIFACT_LABEL}" \
+  --set-env-vars "MODEL_ID=${MODEL_ID},HF_PRODUCTION_REPO_ID=${HF_PRODUCTION_REPO_ID},PRODUCTION_ARTIFACT_LABEL=${PRODUCTION_ARTIFACT_LABEL},MAX_MODEL_LEN=1024,GPU_MEMORY_UTILIZATION=0.82,VLLM_ENFORCE_EAGER=1" \
   --set-secrets "HF_TOKEN=${HF_TOKEN_SECRET_NAME}:latest"
 
 BRAIN_URL="$("$GCLOUD_BIN" run services describe sre-nidaan-brain --region "$REGION" --format='value(status.url)')"
