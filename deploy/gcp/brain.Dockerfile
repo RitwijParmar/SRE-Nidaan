@@ -2,7 +2,7 @@ FROM vllm/vllm-openai:latest
 
 WORKDIR /app
 
-RUN pip install --no-cache-dir "huggingface_hub<1.0"
+RUN pip install --no-cache-dir "huggingface_hub<1.0" peft
 
 COPY inference_server.py /app/inference_server.py
 COPY scripts/08_prepare_production_adapter.py /app/scripts/08_prepare_production_adapter.py
