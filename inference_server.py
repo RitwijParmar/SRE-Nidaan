@@ -15,14 +15,18 @@ import json
 import logging
 from typing import Optional
 
-import nest_asyncio
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from pyngrok import ngrok, conf as ngrok_conf
 
 from src.utils.model_utils import build_chat_prompt
+
+try:
+    from pyngrok import ngrok, conf as ngrok_conf
+    NGROK_AVAILABLE = True
+except ImportError:
+    NGROK_AVAILABLE = False
 
 # ---------------------------------------------------------------------------
 # vLLM imports (deferred so the script still parses on CPU-only machines)
@@ -42,14 +46,17 @@ except ImportError:
 BASE_MODEL = os.environ.get("MODEL_ID", "meta-llama/Meta-Llama-3-8B-Instruct")
 LORA_ADAPTER_PATH = os.environ.get(
     "NEXUS_LORA_PATH",
-    "./results/production_adapter",
+    os.environ.get("PRODUCTION_ADAPTER_DIR", "/models/production_adapter"),
 )
 LORA_ADAPTER_NAME = os.environ.get("NEXUS_LORA_NAME", "sre-nidaan-production")
-MAX_LORA_RANK = 64          # ← caps cudaMemcpyAsync during adapter swaps
-MAX_MODEL_LEN = 2048
+MAX_LORA_RANK = int(os.environ.get("MAX_LORA_RANK", "64"))
+MAX_MODEL_LEN = int(os.environ.get("MAX_MODEL_LEN", "1024"))
 DTYPE = os.environ.get("VLLM_DTYPE", "half")
 QUANTIZATION = os.environ.get("VLLM_QUANTIZATION") or None
-PORT = 8000
+GPU_MEMORY_UTILIZATION = float(os.environ.get("GPU_MEMORY_UTILIZATION", "0.82"))
+ENFORCE_EAGER = os.environ.get("VLLM_ENFORCE_EAGER", "1") == "1"
+ALLOW_MOCK_BRAIN = os.environ.get("ALLOW_MOCK_BRAIN", "0") == "1"
+PORT = int(os.environ.get("PORT", "8000"))
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("sre-nidaan-brain")
@@ -108,15 +115,20 @@ class ChatCompletionResponse(BaseModel):
 # Engine Initialization
 # ---------------------------------------------------------------------------
 engine: Optional[AsyncLLMEngine] = None
+engine_loading_task: Optional[asyncio.Task] = None
+engine_error: Optional[str] = None
 
 
 async def init_engine() -> None:
     """Initialize the vLLM async engine with LoRA support."""
     global engine
+    global engine_error
 
     if not VLLM_AVAILABLE:
-        logger.warning("vLLM unavailable — engine init skipped (mock mode).")
-        return
+        if ALLOW_MOCK_BRAIN:
+            logger.warning("vLLM unavailable — engine init skipped (mock mode).")
+            return
+        raise RuntimeError("vLLM is not installed in this runtime.")
 
     engine_args = AsyncEngineArgs(
         model=BASE_MODEL,
@@ -127,7 +139,8 @@ async def init_engine() -> None:
         max_lora_rank=MAX_LORA_RANK,
         max_loras=2,                       # slots for live adapters
         trust_remote_code=True,
-        gpu_memory_utilization=0.90,
+        gpu_memory_utilization=GPU_MEMORY_UTILIZATION,
+        enforce_eager=ENFORCE_EAGER,
     )
 
     logger.info(
@@ -135,7 +148,18 @@ async def init_engine() -> None:
         BASE_MODEL, MAX_LORA_RANK, QUANTIZATION,
     )
     engine = AsyncLLMEngine.from_engine_args(engine_args)
+    engine_error = None
     logger.info("vLLM engine ready.")
+
+
+async def _bootstrap_engine() -> None:
+    global engine_error
+
+    try:
+        await init_engine()
+    except Exception as exc:
+        engine_error = str(exc)
+        logger.exception("Brain engine initialization failed: %s", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -180,6 +204,12 @@ async def chat_completions(request: ChatCompletionRequest):
 
     # ── Mock path (no GPU / vLLM) ──────────────────────────────────────
     if engine is None:
+        if not ALLOW_MOCK_BRAIN:
+            detail = "Brain is warming up."
+            if engine_error:
+                detail = f"Brain initialization failed: {engine_error}"
+            raise HTTPException(status_code=503, detail=detail)
+
         mock_response = json.dumps({
             "root_cause": "Database connection pool exhaustion caused by auth_service retry storm",
             "intervention_simulation": (
@@ -239,9 +269,18 @@ async def chat_completions(request: ChatCompletionRequest):
 
 @app.get("/health")
 async def health():
+    if engine is not None:
+        status = "ready"
+    elif engine_error:
+        status = "error"
+    else:
+        status = "warming"
+
     return {
-        "status": "healthy",
+        "status": status,
         "engine_loaded": engine is not None,
+        "engine_loading": engine is None and engine_error is None,
+        "engine_error": engine_error,
         "base_model": BASE_MODEL,
         "lora_adapter": LORA_ADAPTER_NAME,
         "max_lora_rank": MAX_LORA_RANK,
@@ -254,15 +293,19 @@ async def health():
 
 @app.on_event("startup")
 async def on_startup():
-    await init_engine()
+    global engine_loading_task
+
+    engine_loading_task = asyncio.create_task(_bootstrap_engine())
 
     # ── Ngrok tunnel ───────────────────────────────────────────────────
     ngrok_token = os.environ.get("NGROK_AUTHTOKEN")
-    if ngrok_token:
+    if ngrok_token and NGROK_AVAILABLE:
         ngrok_conf.get_default().auth_token = ngrok_token
         public_url = ngrok.connect(PORT, "http").public_url
         logger.info("🧠 Brain is LIVE at: %s", public_url)
         logger.info("   └─ POST %s/v1/chat/completions", public_url)
+    elif ngrok_token:
+        logger.warning("NGROK_AUTHTOKEN set but pyngrok is not installed.")
     else:
         logger.warning(
             "NGROK_AUTHTOKEN not set — serving on localhost:%d only.", PORT
@@ -273,5 +316,4 @@ async def on_startup():
 # Entry Point
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    nest_asyncio.apply()
     uvicorn.run(app, host="0.0.0.0", port=PORT)

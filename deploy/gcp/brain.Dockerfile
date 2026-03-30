@@ -4,7 +4,9 @@ WORKDIR /app
 
 RUN pip install --no-cache-dir "huggingface_hub<1.0"
 
+COPY inference_server.py /app/inference_server.py
 COPY scripts/08_prepare_production_adapter.py /app/scripts/08_prepare_production_adapter.py
+COPY src/ /app/src/
 COPY deploy/gcp/brain-start.sh /app/brain-start.sh
 
 RUN chmod +x /app/brain-start.sh

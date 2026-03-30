@@ -8,13 +8,11 @@ Mirrors NEXUS-CAUSAL v3.1 src/utils/model_utils.py pattern.
 from pathlib import Path
 from typing import Mapping, Optional, Sequence
 
-import torch
-from peft import PeftModel
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
-
-def load_frontier_model_and_tokenizer(model_name: str, quantization_config: BitsAndBytesConfig):
+def load_frontier_model_and_tokenizer(model_name: str, quantization_config):
     """Loads a model with a specified quantization config and its tokenizer."""
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
     print(f"🤖 Loading model: {model_name}...")
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
@@ -39,7 +37,7 @@ def load_frontier_model_and_tokenizer(model_name: str, quantization_config: Bits
 def load_peft_checkpoint(
     adapter_dir: str,
     model_name: str,
-    quantization_config: Optional[BitsAndBytesConfig],
+    quantization_config,
     *,
     is_trainable: bool = False,
     tokenizer_padding_side: Optional[str] = None,
@@ -50,6 +48,9 @@ def load_peft_checkpoint(
     The adapter directory owns the tokenizer state because SFT adds special
     schema tokens that must exist before the adapter weights are loaded.
     """
+    from peft import PeftModel
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
     adapter_path = Path(adapter_dir)
     if not adapter_path.exists():
         raise FileNotFoundError(f"Adapter directory does not exist: {adapter_dir}")
