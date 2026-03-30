@@ -45,6 +45,7 @@ except ImportError:
 # ---------------------------------------------------------------------------
 BASE_MODEL = os.environ.get("MODEL_ID", "meta-llama/Meta-Llama-3-8B-Instruct")
 SERVING_BACKEND = os.environ.get("SERVING_BACKEND", "transformers").strip().lower()
+TRANSFORMERS_LOAD_IN_4BIT = os.environ.get("TRANSFORMERS_LOAD_IN_4BIT", "1") == "1"
 LORA_ADAPTER_PATH = os.environ.get(
     "NEXUS_LORA_PATH",
     os.environ.get("PRODUCTION_ADAPTER_DIR", "/models/production_adapter"),
@@ -165,7 +166,7 @@ def _resolve_torch_dtype():
 def _build_transformers_model_sync():
     import torch
     from peft import PeftModel
-    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
     if not torch.cuda.is_available() and not ALLOW_MOCK_BRAIN:
         raise RuntimeError("CUDA GPU is required for the transformers serving backend.")
@@ -186,16 +187,31 @@ def _build_transformers_model_sync():
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "left"
 
-    model = AutoModelForCausalLM.from_pretrained(
-        BASE_MODEL,
-        token=token,
-        trust_remote_code=True,
+    model_kwargs = {
+        "token": token,
+        "trust_remote_code": True,
+        "low_cpu_mem_usage": True,
+        "device_map": "auto",
+    }
+    if TRANSFORMERS_LOAD_IN_4BIT and torch.cuda.is_available():
+        model_kwargs["quantization_config"] = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_compute_dtype=dtype,
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_quant_type="nf4",
+        )
+        model_kwargs["torch_dtype"] = dtype
+    else:
+        model_kwargs["torch_dtype"] = dtype
+
+    model = AutoModelForCausalLM.from_pretrained(BASE_MODEL, **model_kwargs)
+    model = PeftModel.from_pretrained(
+        model,
+        LORA_ADAPTER_PATH,
+        is_trainable=False,
         torch_dtype=dtype,
-        low_cpu_mem_usage=True,
     )
-    model = PeftModel.from_pretrained(model, LORA_ADAPTER_PATH, is_trainable=False)
     model.eval()
-    model.to(device)
 
     return tokenizer, model
 
