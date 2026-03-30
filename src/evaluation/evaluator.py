@@ -15,6 +15,12 @@ import os
 from typing import Dict, List
 from tqdm import tqdm
 
+from src.utils.model_utils import build_chat_prompt
+from src.utils.sre_schema import (
+    coerce_structured_response,
+    generate_and_rerank_structured_response,
+)
+
 
 class SREEvaluationFramework:
     """
@@ -26,11 +32,27 @@ class SREEvaluationFramework:
       - Structural DAG accuracy, root cause precision, safety compliance
     """
 
-    def __init__(self, model, tokenizer, device):
+    def __init__(
+        self,
+        model,
+        tokenizer,
+        device,
+        reward_model=None,
+        strict_schema: bool = False,
+        num_candidates: int = 1,
+        report_path: str = "results/final_evaluation_report.json",
+    ):
         self.model = model
         self.tokenizer = tokenizer
         self.device = device
+        self.reward_model = reward_model
+        self.strict_schema = strict_schema
+        self.num_candidates = max(1, int(num_candidates))
+        self.report_path = report_path
+        self.model_name = getattr(tokenizer, "name_or_path", "")
         self.model.eval()
+        if self.reward_model is not None:
+            self.reward_model.eval()
 
     def create_test_suite(self) -> Dict[str, List[Dict]]:
         """
@@ -214,27 +236,65 @@ class SREEvaluationFramework:
         Evaluate a single test case and return detailed scores.
         """
         premise = test_case["premise"]
-        prompt = (
-            f"<s>[INST] You are an SRE causal reasoning agent. "
-            f"Analyze the following incident using Pearl's Causal Hierarchy. "
-            f"Identify root cause, explain confounding interventions, "
-            f"and recommend safe remediation.\n\n"
-            f"Incident: {premise} [/INST]"
-        )
-
-        inputs = self.tokenizer(prompt, return_tensors="pt").to(self.device)
-
-        with torch.no_grad():
-            outputs = self.model.generate(
-                **inputs,
+        if self.strict_schema or self.num_candidates > 1 or self.reward_model is not None:
+            generated = generate_and_rerank_structured_response(
+                self.model,
+                self.tokenizer,
+                premise=premise,
+                model_name=self.model_name,
+                device=self.device,
+                reward_model=self.reward_model,
+                num_candidates=self.num_candidates,
                 max_new_tokens=256,
-                do_sample=False,
-                pad_token_id=self.tokenizer.eos_token_id,
+            )
+            raw_response = generated["best_response"]
+        else:
+            prompt = build_chat_prompt(
+                [
+                    {
+                        "role": "user",
+                        "content": (
+                            "You are an SRE causal reasoning agent. "
+                            "Analyze the following incident using Pearl's Causal Hierarchy. "
+                            "Identify root cause, explain confounding interventions, "
+                            "and recommend safe remediation.\n\n"
+                            f"Incident: {premise}"
+                        ),
+                    }
+                ],
+                model_name=self.model_name,
+                tokenizer=self.tokenizer,
+                add_generation_prompt=True,
             )
 
-        response = self.tokenizer.decode(
-            outputs[0], skip_special_tokens=True
-        ).lower()
+            original_padding_side = getattr(self.tokenizer, "padding_side", "right")
+            self.tokenizer.padding_side = "left"
+            try:
+                inputs = self.tokenizer(
+                    prompt,
+                    return_tensors="pt",
+                    truncation=True,
+                    max_length=1024,
+                ).to(self.device)
+
+                with torch.no_grad():
+                    outputs = self.model.generate(
+                        **inputs,
+                        max_new_tokens=256,
+                        do_sample=False,
+                        pad_token_id=self.tokenizer.eos_token_id,
+                    )
+            finally:
+                self.tokenizer.padding_side = original_padding_side
+
+            prompt_len = inputs["input_ids"].shape[-1]
+            raw_response = self.tokenizer.decode(
+                outputs[0][prompt_len:],
+                skip_special_tokens=True,
+            ).strip()
+
+        normalized_response = coerce_structured_response(raw_response)
+        response = normalized_response.lower()
 
         # Keyword coverage scoring
         keywords = test_case["keywords"]
@@ -259,6 +319,7 @@ class SREEvaluationFramework:
         return {
             "id": test_case["id"],
             "domain": test_case.get("domain", "unknown"),
+            "response": normalized_response,
             "keyword_coverage": round(coverage, 3),
             "keywords_hit": hits,
             "keywords_missed": [k for k in keywords if k not in hits],
@@ -336,9 +397,9 @@ class SREEvaluationFramework:
             "detailed_results": all_results,
         }
 
-        os.makedirs("results", exist_ok=True)
-        with open("results/final_evaluation_report.json", "w") as f:
+        os.makedirs(os.path.dirname(self.report_path) or "results", exist_ok=True)
+        with open(self.report_path, "w") as f:
             json.dump(evaluation_report, f, indent=2)
 
-        print(f"\n💾 Evaluation report saved to results/final_evaluation_report.json")
+        print(f"\n💾 Evaluation report saved to {self.report_path}")
         return evaluation_report
