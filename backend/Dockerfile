@@ -4,8 +4,8 @@ FROM python:3.10-slim
 WORKDIR /app
 
 # Install dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY backend/requirements-serving.txt ./requirements-serving.txt
+RUN pip install --no-cache-dir -r requirements-serving.txt
 
 # Copy application code
 COPY backend/ ./backend/
