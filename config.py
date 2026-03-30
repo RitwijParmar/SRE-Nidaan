@@ -13,9 +13,20 @@ import os
 
 # ── Model & Tokenizer ────────────────────────────────────────────────────────
 FAST_LOCAL_TEST = os.environ.get("FAST_LOCAL_TEST", "1") == "1"
+USE_FREE_LLM = os.environ.get("USE_FREE_LLM", "0")
 
-# Automatically enforce strict production model per user request
-MODEL_ID = "meta-llama/Meta-Llama-3-8B-Instruct"
+DEFAULT_PRODUCTION_MODEL_ID = "meta-llama/Meta-Llama-3-8B-Instruct"
+FREE_MODEL_ID_BY_FLAG = {
+    "1": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    "2": "HuggingFaceH4/zephyr-7b-beta",
+}
+
+# Explicit MODEL_ID wins. Otherwise keep the production default unless
+# USE_FREE_LLM is set for lower-resource Colab experiments.
+MODEL_ID = os.environ.get(
+    "MODEL_ID",
+    FREE_MODEL_ID_BY_FLAG.get(USE_FREE_LLM, DEFAULT_PRODUCTION_MODEL_ID),
+)
 
 if torch.cuda.is_available():
     DEVICE = "cuda"
@@ -74,10 +85,29 @@ SFT_TRAINING_ARGS = TrainingArguments(
 # ── Reward Model Training ───────────────────────────────────────────────────
 REWARD_MODEL_EPOCHS = 1 if FAST_LOCAL_TEST else 3
 REWARD_MODEL_LR = 5e-5
+REWARD_PREFERENCE_MODE = os.environ.get("REWARD_PREFERENCE_MODE", "prompt_matched")
+REWARD_NEGATIVE_VARIANTS = int(
+    os.environ.get("REWARD_NEGATIVE_VARIANTS", "2" if FAST_LOCAL_TEST else "3")
+)
 
 # ── RLHF Training ───────────────────────────────────────────────────────────
 RLHF_ITERATIONS = 2 if FAST_LOCAL_TEST else 500
 RLHF_LR = 1e-5
+RLHF_SCHEMA_BONUS_WEIGHT = float(
+    os.environ.get("RLHF_SCHEMA_BONUS_WEIGHT", "0.0")
+)
+RLHF_REFERENCE_KL_COEF = float(
+    os.environ.get("RLHF_REFERENCE_KL_COEF", "0.02")
+)
+RLHF_EVAL_INTERVAL = int(
+    os.environ.get("RLHF_EVAL_INTERVAL", "1" if FAST_LOCAL_TEST else "10")
+)
+RLHF_SHORT_STAGE_ITERATIONS = int(
+    os.environ.get("RLHF_SHORT_STAGE_ITERATIONS", "2" if FAST_LOCAL_TEST else "30")
+)
+RLHF_MIN_IMPROVEMENT = float(
+    os.environ.get("RLHF_MIN_IMPROVEMENT", "0.0")
+)
 
 # ── SRE-Specific Configuration ──────────────────────────────────────────────
 SRE_DATASET_SIZE = 10000          # Scaled up for production SRE causal scenarios
