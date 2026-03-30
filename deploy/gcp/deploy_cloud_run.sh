@@ -8,6 +8,7 @@ ARTIFACT_REPO="${ARTIFACT_REPO:-sre-nidaan}"
 TAG="${TAG:-$(date +%Y%m%d-%H%M%S)}"
 MODEL_ID="${MODEL_ID:-meta-llama/Meta-Llama-3-8B-Instruct}"
 HF_TOKEN="${HF_TOKEN:-}"
+HF_TOKEN_SECRET_NAME="${HF_TOKEN_SECRET_NAME:-hf-token}"
 HF_PRODUCTION_REPO_ID="${HF_PRODUCTION_REPO_ID:-ritwijar/SRE-Nidaan-Production}"
 PRODUCTION_ARTIFACT_LABEL="${PRODUCTION_ARTIFACT_LABEL:-checkpoint-1064}"
 
@@ -21,11 +22,6 @@ if [[ -z "$PROJECT_ID" ]]; then
   exit 1
 fi
 
-if [[ -z "$HF_TOKEN" ]]; then
-  echo "Set HF_TOKEN before deploying so the brain service can download the production adapter." >&2
-  exit 1
-fi
-
 IMAGE_PREFIX="${REGION}-docker.pkg.dev/${PROJECT_ID}/${ARTIFACT_REPO}"
 BODY_IMAGE="${IMAGE_PREFIX}/sre-nidaan-body:${TAG}"
 FACE_IMAGE="${IMAGE_PREFIX}/sre-nidaan-face:${TAG}"
@@ -34,7 +30,19 @@ BRAIN_IMAGE="${IMAGE_PREFIX}/sre-nidaan-brain:${TAG}"
 "$GCLOUD_BIN" services enable \
   artifactregistry.googleapis.com \
   cloudbuild.googleapis.com \
-  run.googleapis.com
+  run.googleapis.com \
+  secretmanager.googleapis.com
+
+if "$GCLOUD_BIN" secrets describe "$HF_TOKEN_SECRET_NAME" >/dev/null 2>&1; then
+  if [[ -n "$HF_TOKEN" ]]; then
+    printf "%s" "$HF_TOKEN" | "$GCLOUD_BIN" secrets versions add "$HF_TOKEN_SECRET_NAME" --data-file=-
+  fi
+elif [[ -n "$HF_TOKEN" ]]; then
+  printf "%s" "$HF_TOKEN" | "$GCLOUD_BIN" secrets create "$HF_TOKEN_SECRET_NAME" --data-file=-
+else
+  echo "Set HF_TOKEN for the first deploy so the Hugging Face secret can be created." >&2
+  exit 1
+fi
 
 if ! "$GCLOUD_BIN" artifacts repositories describe "$ARTIFACT_REPO" --location "$REGION" >/dev/null 2>&1; then
   "$GCLOUD_BIN" artifacts repositories create "$ARTIFACT_REPO" \
@@ -63,7 +71,8 @@ fi
   --max-instances 1 \
   --min-instances 0 \
   --timeout 3600 \
-  --set-env-vars "MODEL_ID=${MODEL_ID},HF_TOKEN=${HF_TOKEN},HF_PRODUCTION_REPO_ID=${HF_PRODUCTION_REPO_ID},PRODUCTION_ARTIFACT_LABEL=${PRODUCTION_ARTIFACT_LABEL}"
+  --set-env-vars "MODEL_ID=${MODEL_ID},HF_PRODUCTION_REPO_ID=${HF_PRODUCTION_REPO_ID},PRODUCTION_ARTIFACT_LABEL=${PRODUCTION_ARTIFACT_LABEL}" \
+  --set-secrets "HF_TOKEN=${HF_TOKEN_SECRET_NAME}:latest"
 
 BRAIN_URL="$("$GCLOUD_BIN" run services describe sre-nidaan-brain --region "$REGION" --format='value(status.url)')"
 
