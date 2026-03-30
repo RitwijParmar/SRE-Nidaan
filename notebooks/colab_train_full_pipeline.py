@@ -23,7 +23,7 @@ import json
 import time
 
 # ── HuggingFace Authentication ───────────────────────────────────────────────
-# Required for gated model: mistralai/Mistral-7B-Instruct-v0.2
+# Required for gated model: meta-llama/Meta-Llama-3-8B-Instruct
 # Set this in Colab: Secrets panel → Add HF_TOKEN, or:
 #   import os; os.environ["HF_TOKEN"] = "your_token_here"
 HF_TOKEN = os.environ.get("HF_TOKEN", "")
@@ -48,7 +48,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import torch
 print(f"\n🖥️  Device: {'CUDA — ' + torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU (training will be extremely slow)'}")
 if torch.cuda.is_available():
-    print(f"   VRAM: {torch.cuda.get_device_properties(0).total_mem / 1e9:.1f} GB")
+    print(f"   VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
     print(f"   CUDA Version: {torch.version.cuda}")
 
 # ── Ensure dataset exists ────────────────────────────────────────────────────
@@ -90,7 +90,13 @@ model, tokenizer = load_frontier_model_and_tokenizer(config.MODEL_ID, config.BNB
 print(f"⏱️  Model loaded in {time.time() - t0:.1f}s")
 
 # Run SFT
-sft = SRENexusSFT(model, tokenizer, config.SFT_TRAINING_ARGS, config.LORA_CONFIG)
+sft = SRENexusSFT(
+    model,
+    tokenizer,
+    config.SFT_TRAINING_ARGS,
+    config.LORA_CONFIG,
+    model_name=config.MODEL_ID,
+)
 sft.setup_special_tokens()
 sft.setup_frontier_lora()
 
@@ -115,15 +121,32 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import PeftModel
 from src.training.reward_modeler import train_reward_model
 
+
+def load_peft_checkpoint(adapter_dir: str, *, is_trainable: bool = False):
+    """
+    Load a PEFT checkpoint along with its tokenizer and resize the base model
+    before adapter load so added SRE tokens match the embedding table.
+    """
+    tokenizer = AutoTokenizer.from_pretrained(adapter_dir)
+    base_model = AutoModelForCausalLM.from_pretrained(
+        config.MODEL_ID,
+        quantization_config=config.BNB_CONFIG,
+        device_map="auto",
+        trust_remote_code=True,
+    )
+    base_model.resize_token_embeddings(len(tokenizer))
+    model = PeftModel.from_pretrained(
+        base_model,
+        adapter_dir,
+        is_trainable=is_trainable,
+    )
+    return model, tokenizer
+
+
 # Load SFT model as base
-base_model = AutoModelForCausalLM.from_pretrained(
-    config.MODEL_ID,
-    quantization_config=config.BNB_CONFIG,
-    device_map="auto",
-    trust_remote_code=True,
+sft_model, sft_tokenizer = load_peft_checkpoint(
+    config.SFT_TRAINING_ARGS.output_dir
 )
-sft_model = PeftModel.from_pretrained(base_model, config.SFT_TRAINING_ARGS.output_dir)
-sft_tokenizer = AutoTokenizer.from_pretrained(config.SFT_TRAINING_ARGS.output_dir)
 
 os.makedirs("results", exist_ok=True)
 
@@ -131,12 +154,13 @@ t0 = time.time()
 reward_model = train_reward_model(
     dataset, sft_model, sft_tokenizer,
     config.REWARD_MODEL_EPOCHS, config.REWARD_MODEL_LR, config.DEVICE,
+    model_name=config.MODEL_ID,
 )
 rm_time = time.time() - t0
 print(f"⏱️  Reward model trained in {rm_time / 60:.1f} minutes")
 
 # Free memory
-del base_model, sft_model, reward_model
+del sft_model, reward_model
 torch.cuda.empty_cache()
 
 
@@ -151,23 +175,13 @@ from src.training.rlhf_trainer import execute_rlhf_with_pearls_ladder
 from src.training.reward_modeler import SRE7DRewardModel
 
 # Load policy model
-policy_base = AutoModelForCausalLM.from_pretrained(
-    config.MODEL_ID,
-    quantization_config=config.BNB_CONFIG,
-    device_map="auto",
-    trust_remote_code=True,
+policy_model, tokenizer = load_peft_checkpoint(
+    config.SFT_TRAINING_ARGS.output_dir,
+    is_trainable=True,
 )
-policy_model = PeftModel.from_pretrained(policy_base, config.SFT_TRAINING_ARGS.output_dir)
-tokenizer = AutoTokenizer.from_pretrained(config.SFT_TRAINING_ARGS.output_dir)
 
 # Load reward model
-reward_base = AutoModelForCausalLM.from_pretrained(
-    config.MODEL_ID,
-    quantization_config=config.BNB_CONFIG,
-    device_map="auto",
-    trust_remote_code=True,
-)
-reward_sft = PeftModel.from_pretrained(reward_base, config.SFT_TRAINING_ARGS.output_dir)
+reward_sft, _ = load_peft_checkpoint(config.SFT_TRAINING_ARGS.output_dir)
 reward_model = SRE7DRewardModel(reward_sft, tokenizer)
 reward_model.reward_head.load_state_dict(torch.load("results/reward_model_head.pt"))
 reward_model.to(config.DEVICE)
@@ -176,12 +190,13 @@ t0 = time.time()
 execute_rlhf_with_pearls_ladder(
     dataset, policy_model, reward_model, tokenizer,
     config.RLHF_ITERATIONS, config.RLHF_LR, config.DEVICE,
+    model_name=config.MODEL_ID,
 )
 rlhf_time = time.time() - t0
 print(f"⏱️  RLHF completed in {rlhf_time / 60:.1f} minutes")
 
 # Free memory
-del policy_base, policy_model, reward_base, reward_sft, reward_model
+del policy_model, reward_sft, reward_model
 torch.cuda.empty_cache()
 
 
@@ -195,14 +210,7 @@ print("=" * 70)
 from src.evaluation.evaluator import SREEvaluationFramework
 
 # Load final RLHF model
-final_base = AutoModelForCausalLM.from_pretrained(
-    config.MODEL_ID,
-    quantization_config=config.BNB_CONFIG,
-    device_map="auto",
-    trust_remote_code=True,
-)
-final_model = PeftModel.from_pretrained(final_base, "./results/final_rlhf_model")
-final_tokenizer = AutoTokenizer.from_pretrained("./results/final_rlhf_model")
+final_model, final_tokenizer = load_peft_checkpoint("./results/final_rlhf_model")
 
 evaluator = SREEvaluationFramework(final_model, final_tokenizer, config.DEVICE)
 results = evaluator.conduct_evaluation()
