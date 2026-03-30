@@ -14,6 +14,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import random
 import sys
 from datetime import datetime, timezone
@@ -361,9 +362,49 @@ def _sanitize_json_candidate(raw_content: str) -> str:
         candidate = candidate.replace("json\n", "", 1).replace("JSON\n", "", 1)
     start = candidate.find("{")
     end = candidate.rfind("}")
-    if start != -1 and end != -1 and end > start:
-        return candidate[start : end + 1]
-    return raw_content
+    normalized = candidate[start : end + 1] if start != -1 and end != -1 and end > start else raw_content
+
+    try:
+        payload = json.loads(normalized)
+    except Exception:
+        return normalized
+
+    def _slugify(value: str, fallback: str) -> str:
+        slug = re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_")
+        return slug or fallback
+
+    nodes = payload.get("dag_nodes")
+    if isinstance(nodes, list):
+        normalized_nodes: list[dict[str, Any]] = []
+        for index, node in enumerate(nodes, start=1):
+            if not isinstance(node, dict):
+                continue
+            label = str(node.get("label") or node.get("name") or node.get("id") or f"Node {index}")
+            node_id = str(node.get("id") or _slugify(label, f"node_{index}"))
+            normalized_nodes.append({"id": node_id, "label": label})
+        payload["dag_nodes"] = normalized_nodes
+
+    edges = payload.get("dag_edges")
+    if isinstance(edges, list):
+        normalized_edges: list[dict[str, Any]] = []
+        for index, edge in enumerate(edges, start=1):
+            if not isinstance(edge, dict):
+                continue
+            source = str(edge.get("source") or edge.get("from") or "")
+            target = str(edge.get("target") or edge.get("to") or "")
+            if not source or not target:
+                continue
+            normalized_edges.append(
+                {
+                    "id": str(edge.get("id") or f"e{index}"),
+                    "source": source,
+                    "target": target,
+                    "animated": bool(edge.get("animated", True)),
+                }
+            )
+        payload["dag_edges"] = normalized_edges
+
+    return json.dumps(payload)
 
 
 def _coerce_message_text(content: Any) -> str:
