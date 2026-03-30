@@ -16,4 +16,4 @@ ENV PRODUCTION_ARTIFACT_LABEL=checkpoint-1064
 
 EXPOSE 8000
 
-CMD ["/app/brain-start.sh"]
+ENTRYPOINT ["/bin/bash", "/app/brain-start.sh"]

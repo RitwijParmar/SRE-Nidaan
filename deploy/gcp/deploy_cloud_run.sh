@@ -60,6 +60,8 @@ fi
   --image "$BRAIN_IMAGE" \
   --region "$REGION" \
   --allow-unauthenticated \
+  --command /bin/bash \
+  --args /app/brain-start.sh \
   --port 8000 \
   --execution-environment gen2 \
   --cpu 8 \
