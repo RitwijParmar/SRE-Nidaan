@@ -119,15 +119,11 @@ engine_loading_task: Optional[asyncio.Task] = None
 engine_error: Optional[str] = None
 
 
-async def init_engine() -> None:
-    """Initialize the vLLM async engine with LoRA support."""
-    global engine
-    global engine_error
-
+def _build_engine_sync() -> Optional[AsyncLLMEngine]:
     if not VLLM_AVAILABLE:
         if ALLOW_MOCK_BRAIN:
             logger.warning("vLLM unavailable — engine init skipped (mock mode).")
-            return
+            return None
         raise RuntimeError("vLLM is not installed in this runtime.")
 
     engine_args = AsyncEngineArgs(
@@ -147,7 +143,15 @@ async def init_engine() -> None:
         "Initializing vLLM engine: base=%s | lora_rank_cap=%d | quant=%s",
         BASE_MODEL, MAX_LORA_RANK, QUANTIZATION,
     )
-    engine = AsyncLLMEngine.from_engine_args(engine_args)
+    return AsyncLLMEngine.from_engine_args(engine_args)
+
+
+async def init_engine() -> None:
+    """Initialize the vLLM async engine with LoRA support."""
+    global engine
+    global engine_error
+
+    engine = await asyncio.to_thread(_build_engine_sync)
     engine_error = None
     logger.info("vLLM engine ready.")
 
