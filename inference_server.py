@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import uuid
+from pathlib import Path
 from typing import Optional
 
 import uvicorn
@@ -182,7 +183,12 @@ def _build_transformers_model_sync():
         device,
     )
 
-    tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL, token=token, trust_remote_code=True)
+    tokenizer_source = LORA_ADAPTER_PATH if Path(LORA_ADAPTER_PATH).exists() else BASE_MODEL
+    tokenizer = AutoTokenizer.from_pretrained(
+        tokenizer_source,
+        token=token,
+        trust_remote_code=True,
+    )
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "left"
@@ -205,6 +211,16 @@ def _build_transformers_model_sync():
         model_kwargs["torch_dtype"] = dtype
 
     model = AutoModelForCausalLM.from_pretrained(BASE_MODEL, **model_kwargs)
+    target_vocab_size = len(tokenizer)
+    current_vocab_size = model.get_input_embeddings().weight.shape[0]
+    if target_vocab_size != current_vocab_size:
+        logger.info(
+            "Resizing base model embeddings from %d to %d for adapter tokenizer.",
+            current_vocab_size,
+            target_vocab_size,
+        )
+        model.resize_token_embeddings(target_vocab_size)
+
     model = PeftModel.from_pretrained(
         model,
         LORA_ADAPTER_PATH,
