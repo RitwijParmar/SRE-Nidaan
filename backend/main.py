@@ -68,6 +68,7 @@ FEEDBACK_LOG_PATH = os.environ.get(
 )
 DEFAULT_CANDIDATE_COUNT = _env_int("GENERATION_CANDIDATES", 3, 1, 8)
 DEFAULT_GROUNDING_LIMIT = _env_int("GROUNDING_EVIDENCE_LIMIT", 4, 1, 8)
+GENERATION_MAX_TOKENS = _env_int("GENERATION_MAX_TOKENS", 384, 96, 1024)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("sre-nidaan-body")
@@ -407,7 +408,7 @@ async def _generate_candidate_analyses(
         temperature=0.45 if candidate_count > 1 else 0.2,
         top_p=0.9,
         n=candidate_count,
-        max_tokens=1024,
+        max_tokens=GENERATION_MAX_TOKENS,
         extra_body={"guided_json": CausalAnalysisResponse.model_json_schema()},
     )
 
@@ -588,6 +589,7 @@ async def health() -> dict[str, Any]:
         "artifact_label": PRODUCTION_ARTIFACT_LABEL,
         "knowledge_base_path": GROUNDING_KB_PATH,
         "default_candidate_count": DEFAULT_CANDIDATE_COUNT,
+        "generation_max_tokens": GENERATION_MAX_TOKENS,
         "vllm_request_timeout_seconds": VLLM_REQUEST_TIMEOUT_SECONDS,
         "vllm_max_retries": VLLM_MAX_RETRIES,
     }
