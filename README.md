@@ -1,13 +1,13 @@
 # SRE-Nidaan — NEXUS-CAUSAL v3.1
 
-[![Model](https://img.shields.io/badge/Model-Mistral--7B--Instruct--v0.2-orange.svg)](https://huggingface.co/mistralai/Mistral-7B-Instruct-v0.2)
+[![Model](https://img.shields.io/badge/Model-Meta--Llama--3--8B--Instruct-orange.svg)](https://huggingface.co/meta-llama/Meta-Llama-3-8B-Instruct)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python](https://img.shields.io/badge/Python-3.9+-3776AB.svg)](https://www.python.org/)
 [![Framework](https://img.shields.io/badge/Framework-NEXUS--CAUSAL_v3.1-green.svg)](https://github.com/RitwijParmar/NEXUS-CAUSAL-v3.1)
 
 **Causal AI Site Reliability Engineering System**
 
-An end-to-end distributed system that prevents catastrophic **"panic scaling"** in cloud-native environments by replacing standard correlational AI with formal causal reasoning (Pearl's *do*-calculus). Powered by the [NEXUS-CAUSAL v3.1](https://github.com/RitwijParmar/NEXUS-CAUSAL-v3.1.git) fine-tuned Mistral-7B model.
+An end-to-end distributed system that prevents catastrophic **"panic scaling"** in cloud-native environments by replacing standard correlational AI with formal causal reasoning (Pearl's *do*-calculus). Powered by the [NEXUS-CAUSAL v3.1](https://github.com/RitwijParmar/NEXUS-CAUSAL-v3.1.git) fine-tuned Meta Llama 3 8B Instruct model.
 
 The system achieves **76% exact match accuracy** on the CLADDER benchmark with optimized prompting, outperforming GPT-4 (62%) using a 7B parameter model.
 
@@ -67,7 +67,7 @@ We apply the [NEXUS-CAUSAL v3.1](https://github.com/RitwijParmar/NEXUS-CAUSAL-v3
 │  │  Next.js 14 │◀────│    FastAPI       │◀────│   vLLM + LoRA    │  │
 │  │  Port 3000  │     │    Port 8001     │     │   Port 8000      │  │
 │  └─────────────┘     └──────────────────┘     └──────────────────┘  │
-│   React Flow +        Pydantic Schema         Mistral-7B-Instruct  │
+│   React Flow +        Pydantic Schema         Meta-Llama-3-8B      │
 │   Dagre Layout        Safety Plane             + NEXUS-CAUSAL LoRA  │
 │   Tailwind CSS        MCP Router               4-bit Quantization   │
 │                       Refutation Tests         max_lora_rank=64     │
@@ -75,7 +75,7 @@ We apply the [NEXUS-CAUSAL v3.1](https://github.com/RitwijParmar/NEXUS-CAUSAL-v3
 │  ═══════════════════ DATA FLOW ═════════════════════════════════════ │
 │                                                                      │
 │  1. Frontend sends POST /api/analyze-incident                        │
-│  2. Backend fetches telemetry → builds Mistral [INST] prompt         │
+│  2. Backend fetches telemetry → builds model-native chat prompt      │
 │  3. Prompt sent to vLLM with Pydantic guided_json decoding           │
 │  4. LLM returns causal DAG (root cause + intervention simulation)    │
 │  5. Backend returns JSON with requires_human_approval: true          │
@@ -133,9 +133,9 @@ SRE-Nidaan/
 
 > [!TIP]
 > **HuggingFace Quota or Free Colab Tier?**
-> If you hit gated access limits for Mistral-7B or are running on the free Colab T4 tier, set the `USE_FREE_LLM` environment variable in `config.py` or your terminal:
+> The production default is `meta-llama/Meta-Llama-3-8B-Instruct`. If gated access is unavailable or you are running on the free Colab T4 tier, set `USE_FREE_LLM` in your terminal before starting the pipeline:
 > - `export USE_FREE_LLM="1"` -> **TinyLlama-1.1B** (Requires 0 HF token, fits perfectly on free Colab)
-> - `export USE_FREE_LLM="2"` -> **Zephyr-7B-Beta** (Ungated Mistral-7B equivalent, still needs 16GB VRAM)
+> - `export USE_FREE_LLM="2"` -> **Zephyr-7B-Beta** (ungated 7B fallback, still needs roughly 16 GB VRAM)
 
 ### 1. Clone & Install
 
@@ -143,7 +143,10 @@ SRE-Nidaan/
 git clone https://github.com/RitwijParmar/SRE-Nidaan.git
 cd SRE-Nidaan
 pip install -r requirements.txt
+export HF_TOKEN="your_huggingface_token"  # required for Meta-Llama-3
 ```
+
+`requirements.txt` intentionally pins `huggingface_hub<1.0` because newer Hub releases can break this training environment in the standard CUDA container.
 
 ### 2. Training Pipeline (Colab / GPU)
 
@@ -173,12 +176,14 @@ If you prefer not to use Docker, you can run the services natively:
 **The Brain (vLLM inference via ngrok)**
 ```bash
 export NGROK_AUTHTOKEN="your-token"
+export MODEL_ID="meta-llama/Meta-Llama-3-8B-Instruct"
 python inference_server.py
 ```
 
 **The Body (FastAPI Backend)**
 ```bash
 export VLLM_ENDPOINT="http://localhost:8000/v1"
+export MODEL_ID="meta-llama/Meta-Llama-3-8B-Instruct"
 cd backend && uvicorn main:app --port 8001 --reload
 ```
 
@@ -194,6 +199,7 @@ SRE-Nidaan is fully containerized. You can launch the entire 3-tier distributed 
 ```bash
 # Ensure you have nvidia-docker installed if you want The Brain to use your local GPU
 export HF_TOKEN="your_huggingface_token"
+export MODEL_ID="meta-llama/Meta-Llama-3-8B-Instruct"
 docker-compose up --build -d
 ```
 *This will spin up The Face on port 3000, The Body on port 8001, and The Brain (vLLM) on port 8000.*
@@ -206,7 +212,7 @@ docker-compose up --build -d
 |---|---|
 | `max_lora_rank=64` | Caps GPU memory during adapter swaps; prevents `cudaMemcpyAsync` latency spikes |
 | Pydantic `guided_json` | Deterministic JSON generation — never relies on prompt alone |
-| Mistral `[INST]`/`[/INST]` | Required by Mistral-7B-Instruct-v0.2 tokenizer |
+| Model-native chat prompts | Shared formatter keeps training, evaluation, backend, and vLLM aligned across Llama 3 and fallback models |
 | Concise prompts (no CausalCoT) | Optimized Prompting: 76% CLADDER vs CausalCoT 41% |
 | Read-only copilot pattern | Backend never auto-executes — human must authorize |
 | 7D reward model | Adds blast_radius_awareness + safety_compliance to NEXUS-CAUSAL's 7 dimensions |
@@ -233,7 +239,7 @@ docker-compose up --build -d
 
 **Repository:** https://github.com/RitwijParmar/NEXUS-CAUSAL-v3.1.git
 
-- **Base Model:** `mistralai/Mistral-7B-Instruct-v0.2`
+- **Base Model:** `meta-llama/Meta-Llama-3-8B-Instruct`
 - **Training:** 3-phase pipeline — QLoRA SFT → Reward Modeling → Pearl's Ladder RLHF
 - **Performance:** 76.0% accuracy on CLADDER benchmark (Optimized Prompting)
 
