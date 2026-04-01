@@ -43,14 +43,8 @@ interface VerifierResult {
 }
 
 interface GenerationMetadata {
-  artifact_label: string;
-  source: string;
-  model_id: string;
-  llm_reachable: boolean;
-  candidate_count: number;
-  selected_candidate_index: number;
-  used_fallback: boolean;
-  knowledge_base_path: string;
+  source?: string;
+  used_fallback?: boolean;
 }
 
 interface IncidentResult {
@@ -60,32 +54,13 @@ interface IncidentResult {
   verifier: VerifierResult;
   generation_metadata: GenerationMetadata;
   requires_human_approval: boolean;
-  safety_plane: string;
   telemetry_snapshot: Record<string, Record<string, string | number>>;
-  refutation_status: string;
   timestamp: string;
 }
 
 interface HealthPayload {
   status: string;
   service: string;
-  safety_plane: string;
-  model_id: string;
-  artifact_label: string;
-  vllm_endpoint: string;
-  default_candidate_count: number;
-  generation_max_tokens: number;
-}
-
-interface BrainHealthPayload {
-  status: string;
-  engine_loaded: boolean;
-  engine_loading: boolean;
-  engine_error: string | null;
-  serving_backend: string;
-  base_model: string;
-  lora_adapter: string;
-  max_lora_rank: number;
 }
 
 interface IntegrationCheck {
@@ -98,7 +73,6 @@ interface IntegrationCheck {
 
 interface IntegrationSnapshot {
   status: string;
-  service: string;
   checked_at: string;
   services: {
     face: string;
@@ -106,12 +80,6 @@ interface IntegrationSnapshot {
     telemetry_api: string;
     brain: string;
   };
-  endpoints: {
-    body_health: string;
-    telemetry_api: string;
-    brain_health: string;
-  };
-  notes: string[];
 }
 
 interface InterventionAuthorizationAck {
@@ -144,7 +112,6 @@ const INCIDENT_PRESETS = [
 ];
 
 const NETWORK_TIMEOUT_MS = 12000;
-const REFUTATION_TIMEOUT_MS = 5000;
 const ANALYZE_TIMEOUT_MS = 40000;
 
 function shortTimestamp(value: string): string {
@@ -205,10 +172,6 @@ function normalizeBrainState(value: string | undefined): IntegrationCheck["brain
   return "unknown";
 }
 
-function toBrainHealthUrl(vllmEndpoint: string): string {
-  return vllmEndpoint.replace(/\/v1\/?$/, "/health");
-}
-
 async function fetchWithTimeout(
   input: RequestInfo | URL,
   init: RequestInit = {},
@@ -267,15 +230,13 @@ export default function DashboardPage() {
   const BODY_BASE = "/body";
   const API_BASE = "/api";
   const DIRECT_API_BASE = API_BASE;
+  const ANALYSIS_CANDIDATE_COUNT = 1;
   const TENANT_ID = (process.env.NEXT_PUBLIC_TENANT_ID || "default-tenant").trim();
   const [result, setResult] = useState<IncidentResult | null>(null);
   const [health, setHealth] = useState<HealthPayload | null>(null);
-  const [brainHealth, setBrainHealth] = useState<BrainHealthPayload | null>(null);
   const [telemetry, setTelemetry] = useState<Record<string, Record<string, string | number>> | null>(null);
   const [incidentSummary, setIncidentSummary] = useState(INCIDENT_PRESETS[0].summary);
   const [selectedPreset, setSelectedPreset] = useState(INCIDENT_PRESETS[0].id);
-  const [candidateCount, setCandidateCount] = useState(3);
-  const [expertMode, setExpertMode] = useState(false);
   const [authorized, setAuthorized] = useState(false);
   const [authorizationSubmitting, setAuthorizationSubmitting] = useState(false);
   const [authorizationStatus, setAuthorizationStatus] = useState<string | null>(null);
@@ -289,7 +250,6 @@ export default function DashboardPage() {
   const [feedbackStatus, setFeedbackStatus] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState("Connecting to SRE-Nidaan runtime...");
   const [statusTone, setStatusTone] = useState<"info" | "success" | "error">("info");
-  const [refutation, setRefutation] = useState<Record<string, unknown> | null>(null);
   const [integrationCheck, setIntegrationCheck] = useState<IntegrationCheck | null>(null);
   const [checkingIntegration, setCheckingIntegration] = useState(false);
   const [integrationCheckMessage, setIntegrationCheckMessage] = useState<string | null>(null);
@@ -316,7 +276,7 @@ export default function DashboardPage() {
   const refreshRuntime = useCallback(async (): Promise<HealthPayload> => {
     setRefreshingRuntime(true);
     setStatusTone("info");
-    setStatusMessage("Refreshing runtime status...");
+    setStatusMessage("Checking system readiness...");
     try {
       const [healthRes, telemetryRes] = await Promise.all([
         fetchWithTimeout(`${BODY_BASE}/health`, {}, NETWORK_TIMEOUT_MS),
@@ -336,31 +296,15 @@ export default function DashboardPage() {
         ? ((await telemetryRes.json()) as Record<string, Record<string, string | number>>)
         : null;
 
-      let brainPayload: BrainHealthPayload | null = null;
-      try {
-        const brainHealthResponse = await fetchWithTimeout(
-          toBrainHealthUrl(healthPayload.vllm_endpoint),
-          {},
-          NETWORK_TIMEOUT_MS
-        );
-        if (brainHealthResponse.ok) {
-          brainPayload = (await brainHealthResponse.json()) as BrainHealthPayload;
-        }
-      } catch {
-        // Best effort only.
-      }
-
       setHealth(healthPayload);
       latestHealthRef.current = healthPayload;
-      setBrainHealth(brainPayload);
       setTelemetry(telemetryPayload);
-      setCandidateCount(Math.max(1, Math.min(8, healthPayload.default_candidate_count || 3)));
       setStatusTone("success");
-      setStatusMessage("Runtime refreshed and synchronized.");
+      setStatusMessage("System check completed.");
       return healthPayload;
     } catch (error) {
       setStatusTone("error");
-      setStatusMessage("Runtime refresh failed or timed out. Verify backend/brain health.");
+      setStatusMessage("System check failed. Verify backend connectivity.");
       throw error;
     } finally {
       setRefreshingRuntime(false);
@@ -370,10 +314,12 @@ export default function DashboardPage() {
   const runIntegrationCheck = useCallback(
     async (seedHealth: HealthPayload | null) => {
       setCheckingIntegration(true);
-      setIntegrationCheckMessage("Running integration check...");
+      setIntegrationCheckMessage("Running connectivity checks...");
 
       try {
-        const sourceHealth = seedHealth ?? latestHealthRef.current ?? (await refreshRuntime());
+        if (!seedHealth && !latestHealthRef.current) {
+          await refreshRuntime();
+        }
         const [integrationRes, telemetryRes] = await Promise.all([
           fetchWithTimeout(
             `${API_BASE}/integration-check`,
@@ -391,25 +337,10 @@ export default function DashboardPage() {
           setTelemetry((await telemetryRes.json()) as Record<string, Record<string, string | number>>);
         }
 
-        let brainPayload: BrainHealthPayload | null = null;
-        try {
-          const brainRes = await fetchWithTimeout(
-            toBrainHealthUrl(sourceHealth.vllm_endpoint),
-            {},
-            NETWORK_TIMEOUT_MS
-          );
-          if (brainRes.ok) {
-            brainPayload = (await brainRes.json()) as BrainHealthPayload;
-            setBrainHealth(brainPayload);
-          }
-        } catch {
-          // Best effort only.
-        }
-
         let faceStatus: IntegrationCheck["face"] = "online";
         let bodyStatus: IntegrationCheck["body"] = "online";
         let telemetryStatus: IntegrationCheck["telemetry"] = telemetryRes.ok ? "online" : "offline";
-        let brainStatus: IntegrationCheck["brain"] = normalizeBrainState(brainPayload?.status);
+        let brainStatus: IntegrationCheck["brain"] = "unknown";
         let checkedAt = new Date().toISOString();
 
         if (integrationRes.ok) {
@@ -421,15 +352,13 @@ export default function DashboardPage() {
             integrationPayload.services?.telemetry_api,
             telemetryStatus
           );
-          brainStatus = normalizeBrainState(
-            integrationPayload.services?.brain || brainPayload?.status
-          );
+          brainStatus = normalizeBrainState(integrationPayload.services?.brain);
           setIntegrationCheckMessage(
-            `Integration ${integrationPayload.status} · checked ${shortTimestamp(checkedAt)} · brain ${brainStatus} · telemetry ${telemetryStatus.replace("_", "-")}.`
+            `System ${integrationPayload.status} · checked ${shortTimestamp(checkedAt)}.`
           );
         } else {
           setIntegrationCheckMessage(
-            `Checked ${shortTimestamp(checkedAt)} · diagnostics endpoint unavailable (${integrationRes.status}).`
+            `Checked ${shortTimestamp(checkedAt)} · diagnostics unavailable (${integrationRes.status}).`
           );
         }
 
@@ -450,7 +379,7 @@ export default function DashboardPage() {
           checked_at: checkedAt,
         });
         setIntegrationCheckMessage(
-          `Checked ${shortTimestamp(checkedAt)} · integration check failed or timed out (body/telemetry unreachable).`
+          `Checked ${shortTimestamp(checkedAt)} · connectivity checks failed.`
         );
       } finally {
         setCheckingIntegration(false);
@@ -476,7 +405,7 @@ export default function DashboardPage() {
       } catch (err) {
         if (!disposed) {
           setStatusTone("error");
-          setStatusMessage("Runtime connection failed. Verify backend URL and health endpoint.");
+          setStatusMessage("Could not connect to runtime. Check deployment health.");
           console.error(err);
         }
       }
@@ -488,31 +417,6 @@ export default function DashboardPage() {
       disposed = true;
     };
   }, [refreshRuntime, runIntegrationCheck]);
-
-  const pollRefutation = useCallback(async () => {
-    for (let attempt = 0; attempt < 6; attempt += 1) {
-      await new Promise((resolve) => {
-        window.setTimeout(resolve, 1200);
-      });
-      try {
-        const response = await fetchWithTimeout(
-          `${API_BASE}/refutation-result`,
-          { headers: withTenantHeaders() },
-          REFUTATION_TIMEOUT_MS
-        );
-        if (!response.ok) {
-          continue;
-        }
-        const payload = (await response.json()) as Record<string, unknown>;
-        setRefutation(payload);
-        if (payload.status !== "pending") {
-          break;
-        }
-      } catch {
-        // Non-blocking poll.
-      }
-    }
-  }, [API_BASE, withTenantHeaders]);
 
   const analyzeIncident = useCallback(async () => {
     if (loading) {
@@ -527,15 +431,14 @@ export default function DashboardPage() {
     }, ANALYZE_TIMEOUT_MS);
 
     setLoading(true);
-    setAnalysisStage("Collecting telemetry and prompting the causal model...");
+    setAnalysisStage("Collecting telemetry and generating response...");
     setAuthorized(false);
     setAuthorizationStatus(null);
     setResult(null);
     setFeedbackStatus(null);
-    setRefutation(null);
     setAnalysisError(null);
     setStatusTone("info");
-    setStatusMessage("Running grounded causal analysis...");
+    setStatusMessage("Running incident analysis...");
 
     try {
       const response = await fetchWithTimeout(`${DIRECT_API_BASE}/analyze-incident`, {
@@ -544,7 +447,7 @@ export default function DashboardPage() {
         signal: abortController.signal,
         body: JSON.stringify({
           incident_summary: incidentSummary,
-          candidate_count: candidateCount,
+          candidate_count: ANALYSIS_CANDIDATE_COUNT,
         }),
       }, ANALYZE_TIMEOUT_MS + 1500);
 
@@ -561,12 +464,7 @@ export default function DashboardPage() {
       setResult(payload);
       setTelemetry(payload.telemetry_snapshot);
       setStatusTone("success");
-      setStatusMessage(
-        payload.generation_metadata.used_fallback
-          ? "Analysis complete with grounded fallback path."
-          : "Analysis complete from live candidate selection."
-      );
-      void pollRefutation();
+      setStatusMessage("Analysis complete.");
     } catch (err) {
       console.error(err);
       if (analysisRunRef.current !== runId) {
@@ -577,18 +475,18 @@ export default function DashboardPage() {
       setAnalysisError(
         aborted
           ? "Analysis was cancelled before completion."
-          : "Live analysis failed. Review runtime diagnostics and retry."
+          : "Analysis failed. Please retry."
       );
       if (aborted) {
         setStatusTone("error");
         setStatusMessage(
           stopReason === "timeout"
-            ? "Analysis timed out. No synthetic fallback shown."
-            : "Analysis stopped. No synthetic fallback shown."
+            ? "Analysis timed out before completion."
+            : "Analysis stopped by operator."
         );
       } else {
         setStatusTone("error");
-        setStatusMessage("Live inference failed. No synthetic fallback shown.");
+        setStatusMessage("Analysis failed. Please retry.");
       }
     } finally {
       window.clearTimeout(timeoutHandle);
@@ -600,7 +498,13 @@ export default function DashboardPage() {
         setAnalysisStage(null);
       }
     }
-  }, [DIRECT_API_BASE, candidateCount, incidentSummary, loading, pollRefutation, withTenantHeaders]);
+  }, [
+    ANALYSIS_CANDIDATE_COUNT,
+    DIRECT_API_BASE,
+    incidentSummary,
+    loading,
+    withTenantHeaders,
+  ]);
 
   const stopAnalysis = useCallback(() => {
     if (analysisAbortRef.current) {
@@ -727,22 +631,21 @@ export default function DashboardPage() {
       <div className="nidaan-glow nidaan-glow-left" />
       <div className="nidaan-glow nidaan-glow-right" />
 
-      <header className="sticky top-0 z-50 border-b border-nidaan-border/80 bg-nidaan-paper/90 backdrop-blur-xl">
+      <header className="sticky top-0 z-50 border-b border-nidaan-border/80 bg-nidaan-paper">
         <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-4 px-4 py-4 lg:flex-row lg:items-center lg:justify-between lg:px-6">
           <div className="flex items-start gap-3">
             <img
               src="/sre-nidaan-mark.svg"
-              alt="SRE Nidaan logo"
-              className="h-12 w-12 rounded-2xl border border-white/80 shadow-md"
+              alt="SRE निदान logo"
+              className="h-12 w-12 rounded-2xl border border-white/80 shadow-md md:h-14 md:w-14"
             />
             <div>
-              <p className="nidaan-mono text-[10px] uppercase tracking-[0.16em] text-nidaan-muted">SRE-Nidaan</p>
+              <p className="nidaan-mono text-[10px] uppercase tracking-[0.16em] text-nidaan-muted">SRE NIDAAN</p>
               <h1 className="nidaan-display text-2xl font-semibold text-nidaan-ink md:text-[30px]">
-                Incident Response Command Center
+                SRE निदान Command Deck
               </h1>
-              <p className="text-sm font-medium text-nidaan-accent">एसआरई निदान</p>
               <p className="text-sm text-nidaan-muted">
-                Describe incident. Run analysis. Approve safely. Capture feedback.
+                Clear incident diagnosis, safer approvals, and a guided operator workflow.
               </p>
             </div>
           </div>
@@ -778,22 +681,7 @@ export default function DashboardPage() {
               disabled={refreshingRuntime || checkingIntegration}
               className="rounded-xl border border-nidaan-border bg-white px-3 py-2 text-sm font-medium text-nidaan-ink transition hover:border-nidaan-accent/40 hover:text-nidaan-accent disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {refreshingRuntime || checkingIntegration ? "Refreshing..." : "Refresh Runtime"}
-            </button>
-            <button
-              onClick={() => {
-                void runIntegrationCheck(health);
-              }}
-              disabled={checkingIntegration || refreshingRuntime}
-              className="rounded-xl border border-nidaan-border bg-white px-3 py-2 text-sm font-medium text-nidaan-ink transition hover:border-nidaan-accent/40 hover:text-nidaan-accent disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {checkingIntegration ? "Checking..." : "Integration Check"}
-            </button>
-            <button
-              onClick={() => setExpertMode((value) => !value)}
-              className="rounded-xl border border-nidaan-border bg-white px-3 py-2 text-sm font-medium text-nidaan-ink transition hover:border-nidaan-accent/40 hover:text-nidaan-accent"
-            >
-              {expertMode ? "Advanced: On" : "Advanced: Off"}
+              {refreshingRuntime || checkingIntegration ? "Checking..." : "Check System"}
             </button>
           </div>
         </div>
@@ -805,27 +693,27 @@ export default function DashboardPage() {
           <div className="flex flex-wrap items-center gap-2">
             <span className="nidaan-status-pill">
               <span className={`nidaan-status-dot ${integrationCheck?.face === "offline" ? "bg-nidaan-danger" : "bg-nidaan-success"}`} />
-              face
+              frontend
             </span>
             <span className="nidaan-status-pill">
               <span className={`nidaan-status-dot ${integrationCheck?.body === "online" || health ? "bg-nidaan-success" : "bg-nidaan-danger"}`} />
-              body
+              backend
             </span>
             <span className="nidaan-status-pill">
               <span className={`nidaan-status-dot ${
                 telemetryState === "online" ? "bg-nidaan-success" : telemetryState === "online_simulated" ? "bg-nidaan-warning" : "bg-nidaan-danger"
               }`} />
-              telemetry: {telemetryLabel}
+              data: {telemetryLabel}
             </span>
             <span className="nidaan-status-pill">
               <span className={`nidaan-status-dot ${
-                (integrationCheck?.brain ?? brainHealth?.status) === "ready"
+                (integrationCheck?.brain ?? "unknown") === "ready"
                   ? "bg-nidaan-success"
-                  : (integrationCheck?.brain ?? brainHealth?.status) === "warming"
+                  : (integrationCheck?.brain ?? "unknown") === "warming"
                     ? "bg-nidaan-warning"
                     : "bg-nidaan-danger"
               }`} />
-              brain: {integrationCheck?.brain ?? brainHealth?.status ?? "unknown"}
+              ai: {integrationCheck?.brain ?? "unknown"}
             </span>
           </div>
         </div>
@@ -869,51 +757,24 @@ export default function DashboardPage() {
               className="mt-4 w-full rounded-2xl border border-nidaan-border bg-white p-3 text-sm leading-relaxed text-nidaan-ink outline-none transition focus:border-nidaan-accent/45 focus:ring-2 focus:ring-nidaan-accent/15"
               placeholder="Example: Login requests are retrying. Error rate jumped to 18%. DB connections are near max."
             />
-            {expertMode && (
-              <div className="mt-4 rounded-xl border border-nidaan-border bg-white/90 p-3">
-                <div className="mb-2 flex items-center justify-between">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-nidaan-muted">Candidate Depth</p>
-                  <span className="nidaan-mono text-xs text-nidaan-ink">{candidateCount}</span>
-                </div>
-                <input
-                  type="range"
-                  min={1}
-                  max={8}
-                  step={1}
-                  value={candidateCount}
-                  onChange={(event) => setCandidateCount(Number(event.target.value))}
-                  className="w-full accent-[#0b7a75]"
-                />
-                <p className="mt-2 text-xs text-nidaan-muted">
-                  Use 1-3 for speed, 4-8 for diverse candidate search.
-                </p>
-              </div>
-            )}
           </article>
 
           <article className="nidaan-card p-5">
             <div className="mb-2 flex items-center justify-between">
-              <h2 className="nidaan-display text-lg font-semibold text-nidaan-ink">2. Health & Trust</h2>
+              <h2 className="nidaan-display text-lg font-semibold text-nidaan-ink">2. System Status</h2>
               <span className="nidaan-chip">live status</span>
             </div>
             <div className="space-y-2 text-sm text-nidaan-muted">
-              <p>Model: <span className="font-semibold text-nidaan-ink">{health?.model_id ?? "waiting..."}</span></p>
-              <p>Artifact: <span className="font-semibold text-nidaan-ink">{health?.artifact_label ?? "waiting..."}</span></p>
-              <p>Safety Plane: <span className="font-semibold text-nidaan-ink">{health?.safety_plane ?? "read-only-copilot"}</span></p>
-              <p>Telemetry: <span className={`font-semibold ${telemetryState === "online" ? "text-nidaan-success" : telemetryState === "online_simulated" ? "text-nidaan-warning" : "text-nidaan-danger"}`}>{telemetryLabel}</span></p>
+              <p>Platform: <span className="font-semibold text-nidaan-ink">{integrationCheck?.body === "online" ? "Connected" : "Checking..."}</span></p>
+              <p>Data Feed: <span className={`font-semibold ${telemetryState === "online" ? "text-nidaan-success" : telemetryState === "online_simulated" ? "text-nidaan-warning" : "text-nidaan-danger"}`}>{telemetryLabel}</span></p>
+              <p>AI Engine: <span className="font-semibold text-nidaan-ink">{integrationCheck?.brain ?? "checking..."}</span></p>
+              <p>Observed Services: <span className="font-semibold text-nidaan-ink">{telemetryServiceCount || "not yet"}</span></p>
+              <p>Last Check: <span className="font-semibold text-nidaan-ink">{integrationCheck?.checked_at ? shortTimestamp(integrationCheck.checked_at) : "not yet"}</span></p>
             </div>
             {telemetryState === "online_simulated" && (
               <p className="mt-3 rounded-xl border border-nidaan-warning/30 bg-nidaan-warning/10 px-3 py-2 text-xs text-nidaan-warning">
-                Telemetry is simulated. Connect live telemetry before calling this production-ready.
+                Data is currently simulated. Connect live telemetry before production escalation actions.
               </p>
-            )}
-            {expertMode && (
-              <div className="mt-3 rounded-xl border border-nidaan-border bg-white p-3 text-xs text-nidaan-ink">
-                <p className="break-all"><span className="nidaan-mono text-nidaan-muted">body:</span> {BODY_BASE}</p>
-                <p className="mt-1 break-all"><span className="nidaan-mono text-nidaan-muted">brain:</span> {health ? toBrainHealthUrl(health.vllm_endpoint) : "waiting..."}</p>
-                <p className="mt-1"><span className="nidaan-mono text-nidaan-muted">services seen:</span> {telemetryServiceCount}</p>
-                <a href={`${BODY_BASE}/docs`} className="mt-2 inline-block text-nidaan-accent-strong underline">Open API Docs</a>
-              </div>
             )}
           </article>
 
@@ -921,9 +782,9 @@ export default function DashboardPage() {
             <h2 className="nidaan-display text-lg font-semibold text-nidaan-ink">3. Guided Flow</h2>
             <div className="mt-3 space-y-2 text-sm text-nidaan-muted">
               <p><span className="nidaan-mono text-nidaan-ink">A.</span> Click <strong>Analyze Incident</strong>.</p>
-              <p><span className="nidaan-mono text-nidaan-ink">B.</span> Check root cause + graph + evidence.</p>
-              <p><span className="nidaan-mono text-nidaan-ink">C.</span> Authorize only if safe.</p>
-              <p><span className="nidaan-mono text-nidaan-ink">D.</span> Submit feedback for model improvement.</p>
+              <p><span className="nidaan-mono text-nidaan-ink">B.</span> Review cause, graph, and evidence summary.</p>
+              <p><span className="nidaan-mono text-nidaan-ink">C.</span> Authorize intervention only with clear safety reason.</p>
+              <p><span className="nidaan-mono text-nidaan-ink">D.</span> Submit operator feedback to improve future analyses.</p>
             </div>
           </article>
         </section>
@@ -943,7 +804,7 @@ export default function DashboardPage() {
                       ? "border-nidaan-success/30 bg-nidaan-success/10 text-nidaan-success"
                       : "border-nidaan-warning/30 bg-nidaan-warning/10 text-nidaan-warning"
                   }`}>
-                    {graphResult.generation_metadata.source}
+                    {graphResult.verifier.accepted ? "confidence: good" : "confidence: review"}
                   </span>
                   <span className="rounded-full border border-nidaan-border bg-white px-2 py-1 nidaan-mono text-nidaan-muted">
                     {graphResult.analysis.dag_nodes.length} nodes · {graphResult.analysis.dag_edges.length} edges
@@ -981,7 +842,7 @@ export default function DashboardPage() {
                 <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
                   <p className="text-sm font-semibold text-nidaan-danger">{analysisError}</p>
                   <p className="max-w-md text-xs text-nidaan-muted">
-                    Runtime looks unhealthy. Refresh runtime and run integration check once before retrying.
+                    Check system status and retry once platform health is green.
                   </p>
                 </div>
               ) : (
@@ -1026,7 +887,7 @@ export default function DashboardPage() {
                 <p className="text-sm leading-relaxed text-nidaan-ink">{result.analysis.intervention_simulation}</p>
               </div>
               <div className="nidaan-card p-4">
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-nidaan-muted">Recommended Action</p>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-nidaan-muted">Recommended Next Action</p>
                 <p className="text-sm leading-relaxed text-nidaan-ink">{result.analysis.recommended_action}</p>
               </div>
             </article>
@@ -1066,7 +927,7 @@ export default function DashboardPage() {
                     </button>
                     {authorizationStatus && <p className="text-xs text-nidaan-ink">{authorizationStatus}</p>}
                     <p className="text-xs text-nidaan-muted">
-                      Safety plane <span className="nidaan-mono text-nidaan-ink">{result.safety_plane}</span> requires explicit human approval.
+                      Human approval is mandatory before executing incident interventions.
                     </p>
                   </div>
                 ) : (
@@ -1078,19 +939,12 @@ export default function DashboardPage() {
 
               <div className="nidaan-card p-5">
                 <div className="mb-3 flex items-center justify-between">
-                  <h3 className="nidaan-display text-lg font-semibold text-nidaan-ink">Evidence & Verifier</h3>
+                  <h3 className="nidaan-display text-lg font-semibold text-nidaan-ink">Evidence Summary</h3>
                   <span className="nidaan-chip">{result.grounding_evidence.length} sources</span>
                 </div>
-                <div className="mb-4 grid grid-cols-2 gap-2">
-                  <div className="rounded-xl border border-nidaan-border bg-white p-2.5 text-xs">
-                    <p className="nidaan-mono text-nidaan-muted">score</p>
-                    <p className="font-semibold text-nidaan-ink">{result.verifier.score.toFixed(3)}</p>
-                  </div>
-                  <div className="rounded-xl border border-nidaan-border bg-white p-2.5 text-xs">
-                    <p className="nidaan-mono text-nidaan-muted">source</p>
-                    <p className="font-semibold text-nidaan-ink">{result.generation_metadata.source}</p>
-                  </div>
-                </div>
+                <p className="mb-4 text-xs text-nidaan-muted">
+                  Confidence score: <span className="font-semibold text-nidaan-ink">{result.verifier.score.toFixed(3)}</span>
+                </p>
                 <div className="space-y-2">
                   {result.grounding_evidence.slice(0, 3).map((evidence) => (
                     <div key={evidence.id} className="rounded-xl border border-nidaan-border bg-white p-3">
@@ -1099,11 +953,6 @@ export default function DashboardPage() {
                     </div>
                   ))}
                 </div>
-                {expertMode && refutation && (
-                  <p className="mt-3 text-xs text-nidaan-muted">
-                    Refutation: {String(refutation.verdict || "pending")}
-                  </p>
-                )}
               </div>
             </article>
           )}
@@ -1112,7 +961,6 @@ export default function DashboardPage() {
             <article id="analyst-feedback-loop" className="nidaan-card p-5">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <h3 className="nidaan-display text-lg font-semibold text-nidaan-ink">5. Analyst Feedback</h3>
-                <span className="nidaan-mono text-[10px] uppercase tracking-wider text-nidaan-muted">{result.analysis_id}</span>
               </div>
               <p className="mb-3 text-sm text-nidaan-muted">
                 Mark whether this response was useful, and add corrections if needed.
@@ -1148,8 +996,8 @@ export default function DashboardPage() {
 
       <footer className="border-t border-nidaan-border/80 bg-white/80 px-4 py-4 lg:px-6">
         <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-1 text-xs text-nidaan-muted md:flex-row md:items-center md:justify-between">
-          <span>SRE-Nidaan · Causal incident assistant with human approval gates</span>
-          <span className="nidaan-mono">Safety Plane: read-only-copilot · requires_human_approval=true</span>
+          <span>SRE निदान · Causal incident assistant with operator safety gates</span>
+          <span className="nidaan-mono">Designed for incident command workflows</span>
         </div>
       </footer>
     </div>

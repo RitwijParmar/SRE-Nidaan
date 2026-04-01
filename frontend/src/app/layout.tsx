@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "SRE-Nidaan | Incident Response Copilot (एसआरई निदान)",
+  title: "SRE निदान | Incident Command Copilot",
   description:
-    "SRE-Nidaan helps teams describe incidents, run grounded causal analysis, approve interventions safely, and capture analyst feedback in one clear workflow.",
+    "SRE निदान helps teams diagnose incidents quickly, review causal evidence, and approve safer interventions in a clear guided workflow.",
 };
 
 export default function RootLayout({
@@ -14,7 +14,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className="min-h-screen bg-[#f3eee5] text-[#1f2a36] antialiased">{children}</body>
+      <body className="min-h-screen antialiased">{children}</body>
     </html>
   );
 }

@@ -1118,21 +1118,6 @@ async def integration_check() -> dict[str, Any]:
             "telemetry_api": telemetry_status,
             "brain": brain_status,
         },
-        "endpoints": {
-            "body_health": "/health",
-            "telemetry_api": "/api/telemetry",
-            "brain_health": brain_health_url,
-        },
-        "notes": [
-            "Use this endpoint for one-click integration diagnostics.",
-            "Brain status is probed from the configured VLLM endpoint.",
-            f"Telemetry source: {telemetry_source}",
-            (
-                "Telemetry is live from external source."
-                if telemetry_is_live
-                else "Telemetry is simulated/static. Connect TELEMETRY_SOURCE_URL for production trust."
-            ),
-        ],
     }
 
 
@@ -1235,24 +1220,13 @@ async def authorize_intervention(
 
 @app.get("/health")
 async def health() -> dict[str, Any]:
+    telemetry_mode = "live" if TELEMETRY_SOURCE_URL else "simulated"
     return {
         "status": "healthy",
         "service": "sre-nidaan-body",
-        "safety_plane": "read-only-copilot",
-        "vllm_endpoint": VLLM_ENDPOINT,
-        "model_id": MODEL_ID,
-        "artifact_label": PRODUCTION_ARTIFACT_LABEL,
-        "knowledge_base_path": GROUNDING_KB_PATH,
-        "default_candidate_count": DEFAULT_CANDIDATE_COUNT,
-        "generation_max_tokens": GENERATION_MAX_TOKENS,
-        "vllm_request_timeout_seconds": VLLM_REQUEST_TIMEOUT_SECONDS,
-        "live_analysis_timeout_seconds": LIVE_ANALYSIS_TIMEOUT_SECONDS,
-        "vllm_max_retries": VLLM_MAX_RETRIES,
-        "mcp_tools_registered": len(MCP_ROUTER.list_tools()),
-        "telemetry_source_url": TELEMETRY_SOURCE_URL or "simulated-static",
-        "require_tenant_id": REQUIRE_TENANT_ID,
-        "require_api_auth": REQUIRE_API_AUTH,
-        "api_auth_enabled": bool(API_AUTH_TOKEN),
+        "runtime_mode": "production",
+        "telemetry_mode": telemetry_mode,
+        "safety_gates": "human-approval-required",
     }
 
 

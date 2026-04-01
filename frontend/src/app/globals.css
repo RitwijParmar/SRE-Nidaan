@@ -53,16 +53,16 @@ a {
 }
 
 ::-webkit-scrollbar-track {
-  background: #e8e2d8;
+  background: #edf4fb;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #b7ad9f;
+  background: #adc2d8;
   border-radius: 20px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #988f82;
+  background: #8ea8c0;
 }
 
 .nidaan-shell {
@@ -80,8 +80,8 @@ a {
   z-index: 0;
   pointer-events: none;
   border-radius: 999px;
-  filter: blur(90px);
-  opacity: 0.34;
+  filter: blur(72px);
+  opacity: 0.26;
   transform: translateZ(0);
 }
 
@@ -104,10 +104,9 @@ a {
 .nidaan-card {
   position: relative;
   z-index: 1;
-  background: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.94);
   border: 1px solid rgba(214, 225, 236, 0.96);
   border-radius: 20px;
-  backdrop-filter: blur(8px);
   box-shadow: 0 12px 30px rgba(18, 32, 51, 0.08);
 }
 
