@@ -9,6 +9,7 @@ import {
   Position,
   ReactFlow,
   type Edge,
+  type NodeMouseHandler,
   type Node,
   type NodeTypes,
   useEdgesState,
@@ -32,9 +33,21 @@ interface DAGEdgeData {
 interface CausalGraphProps {
   nodes: DAGNodeData[];
   edges: DAGEdgeData[];
+  selectedNodeId?: string | null;
+  onSelectNode?: (id: string) => void;
 }
 
-function CausalNode({ data }: { data: { label: string } }) {
+function CausalNode({
+  data,
+}: {
+  data: { label: string; role: "entry" | "junction" | "outcome"; selected: boolean };
+}) {
+  const roleLabel =
+    data.role === "entry"
+      ? "entry"
+      : data.role === "outcome"
+        ? "outcome"
+        : "intermediate";
   return (
     <div className="group relative">
       <Handle
@@ -42,7 +55,17 @@ function CausalNode({ data }: { data: { label: string } }) {
         position={Position.Top}
         className="!h-2.5 !w-2.5 !border-[#0b7a75] !bg-[#0b7a75]"
       />
-      <div className="min-w-[180px] cursor-default rounded-2xl border border-[#0e5cb5]/30 bg-gradient-to-br from-[#ffffff] to-[#eef5ff] px-5 py-3 text-center shadow-md shadow-[#122033]/10 transition-all duration-200 group-hover:border-[#0b7a75]/55 group-hover:shadow-lg group-hover:shadow-[#122033]/15">
+      <div
+        className={`min-w-[180px] cursor-pointer rounded-2xl border bg-gradient-to-br from-[#ffffff] to-[#eef5ff] px-5 py-3 text-center shadow-md shadow-[#122033]/10 transition-all duration-200 group-hover:border-[#0b7a75]/55 group-hover:shadow-lg group-hover:shadow-[#122033]/15 ${
+          data.selected
+            ? "border-[#0b7a75] ring-2 ring-[#0b7a75]/20"
+            : "border-[#0e5cb5]/30"
+        }`}
+      >
+        <span className="mb-1 inline-block rounded-full border border-[#cde1f6] bg-[#f4f9ff] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#3f5e79]">
+          {roleLabel}
+        </span>
+        <br />
         <span className="text-sm font-semibold text-[#122033]">{data.label}</span>
         <div className="pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-t from-[#0e5cb5]/5 to-transparent" />
       </div>
@@ -101,15 +124,39 @@ function getLayoutedElements(
   return { nodes: layoutedNodes, edges };
 }
 
-export default function CausalGraph({ nodes: rawNodes, edges: rawEdges }: CausalGraphProps) {
+function computeNodeRole(
+  nodeId: string,
+  edges: DAGEdgeData[]
+): "entry" | "junction" | "outcome" {
+  const incoming = edges.filter((edge) => edge.target === nodeId).length;
+  const outgoing = edges.filter((edge) => edge.source === nodeId).length;
+  if (incoming === 0 && outgoing > 0) {
+    return "entry";
+  }
+  if (incoming > 0 && outgoing === 0) {
+    return "outcome";
+  }
+  return "junction";
+}
+
+export default function CausalGraph({
+  nodes: rawNodes,
+  edges: rawEdges,
+  selectedNodeId = null,
+  onSelectNode,
+}: CausalGraphProps) {
   const initialData = useMemo(() => {
     const rfNodes: Node[] = rawNodes.map((node) => ({
       id: node.id,
       type: "causal",
-      data: { label: node.label },
+      data: {
+        label: node.label,
+        role: computeNodeRole(node.id, rawEdges),
+        selected: selectedNodeId === node.id,
+      },
       position: { x: 0, y: 0 },
       draggable: false,
-      selectable: false,
+      selectable: true,
     }));
 
     const rfEdges: Edge[] = rawEdges.map((edge) => ({
@@ -130,7 +177,7 @@ export default function CausalGraph({ nodes: rawNodes, edges: rawEdges }: Causal
     }));
 
     return getLayoutedElements(rfNodes, rfEdges, "TB");
-  }, [rawNodes, rawEdges]);
+  }, [rawEdges, rawNodes, selectedNodeId]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialData.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialData.edges);
@@ -149,6 +196,15 @@ export default function CausalGraph({ nodes: rawNodes, edges: rawEdges }: Causal
     [edges, nodes, setEdges, setNodes]
   );
 
+  const handleNodeClick: NodeMouseHandler = useCallback(
+    (_event, node) => {
+      if (onSelectNode) {
+        onSelectNode(node.id);
+      }
+    },
+    [onSelectNode]
+  );
+
   return (
     <div className="relative h-full w-full">
       <div className="absolute right-3 top-3 z-10 flex gap-1.5">
@@ -165,12 +221,16 @@ export default function CausalGraph({ nodes: rawNodes, edges: rawEdges }: Causal
           Left-Right
         </button>
       </div>
+      <div className="absolute bottom-3 left-3 z-10 rounded-md border border-nidaan-border bg-white/95 px-2 py-1 text-[10px] text-nidaan-muted shadow-sm">
+        Select a node to inspect linked evidence.
+      </div>
 
       <ReactFlow
         nodes={nodes}
         edges={edges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
+        onNodeClick={handleNodeClick}
         nodeTypes={nodeTypes}
         fitView
         fitViewOptions={{ padding: 0.35 }}

@@ -94,21 +94,55 @@ const INCIDENT_PRESETS = [
   {
     id: "auth-retry-storm",
     title: "Auth Retry Storm",
+    severity: "SEV-1",
+    signal:
+      "Auth p95 latency jumped from 210ms to 1.8s. Error rate increased to 18%. DB active connections reached 99%.",
+    impact:
+      "Login and checkout flows are timing out for EU and US regions. Customer session drop is rising.",
+    change:
+      "New auth middleware deployment rolled out 18 minutes before the spike.",
+    services: ["auth-service", "api-gateway", "postgres"],
     summary:
       "Login bursts trigger retry loops in auth-service. Frontend 503 spikes while DB connections climb to 99%.",
   },
   {
     id: "cache-eviction",
     title: "Cache Eviction Drift",
+    severity: "SEV-2",
+    signal:
+      "Cache hit ratio dropped from 92% to 54%. API p95 doubled. Datastore CPU sustained above 85%.",
+    impact:
+      "Recommendation and profile pages are degraded with slower responses and intermittent 5xx errors.",
+    change:
+      "Redis memory policy update and config reload completed 35 minutes ago.",
+    services: ["redis", "profile-api", "recommendation-service"],
     summary:
       "Preference cache misses surged after deployment. API gateway latency doubled and datastore saturation is rising.",
   },
   {
     id: "kafka-rebalance",
     title: "Kafka Rebalance Cascade",
+    severity: "SEV-2",
+    signal:
+      "Consumer lag rose from near-zero to 240k. Worker CPU is pegged and downstream write retries are climbing.",
+    impact:
+      "Event-driven billing updates and notification delivery are delayed across two regions.",
+    change:
+      "Broker maintenance caused repeated consumer group rebalances during peak traffic.",
+    services: ["kafka", "worker-service", "billing-writer"],
     summary:
       "Consumer lag jumped after rebalance storms. Worker CPU spikes and downstream writes back up across regions.",
   },
+];
+
+const SERVICE_OPTIONS = [
+  "api-gateway",
+  "auth-service",
+  "checkout-service",
+  "worker-service",
+  "postgres",
+  "redis",
+  "kafka",
 ];
 
 const NETWORK_TIMEOUT_MS = 12000;
@@ -226,6 +260,14 @@ function ensureRenderableIncidentResult(payload: IncidentResult): IncidentResult
   };
 }
 
+function normalizeTerms(value: string): string[] {
+  return value
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .map((term) => term.trim())
+    .filter((term) => term.length > 2);
+}
+
 export default function DashboardPage() {
   const BODY_BASE = "/body";
   const API_BASE = "/api";
@@ -236,7 +278,20 @@ export default function DashboardPage() {
   const [health, setHealth] = useState<HealthPayload | null>(null);
   const [telemetry, setTelemetry] = useState<Record<string, Record<string, string | number>> | null>(null);
   const [incidentSummary, setIncidentSummary] = useState(INCIDENT_PRESETS[0].summary);
+  const [incidentSeverity, setIncidentSeverity] = useState(INCIDENT_PRESETS[0].severity);
+  const [incidentSignal, setIncidentSignal] = useState(INCIDENT_PRESETS[0].signal);
+  const [incidentImpact, setIncidentImpact] = useState(INCIDENT_PRESETS[0].impact);
+  const [incidentChange, setIncidentChange] = useState(INCIDENT_PRESETS[0].change);
+  const [incidentStartedAt, setIncidentStartedAt] = useState(() => {
+    const now = new Date();
+    const local = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
+    return local.toISOString().slice(0, 16);
+  });
+  const [affectedServices, setAffectedServices] = useState<string[]>(
+    INCIDENT_PRESETS[0].services
+  );
   const [selectedPreset, setSelectedPreset] = useState(INCIDENT_PRESETS[0].id);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [authorized, setAuthorized] = useState(false);
   const [authorizationSubmitting, setAuthorizationSubmitting] = useState(false);
   const [authorizationStatus, setAuthorizationStatus] = useState<string | null>(null);
@@ -262,6 +317,99 @@ export default function DashboardPage() {
     () => (result ? ensureRenderableIncidentResult(result) : null),
     [result]
   );
+  const selectedGraphNode = useMemo(() => {
+    if (!graphResult || !selectedNodeId) {
+      return null;
+    }
+    return (
+      graphResult.analysis.dag_nodes.find((node) => node.id === selectedNodeId) || null
+    );
+  }, [graphResult, selectedNodeId]);
+  const graphInspector = useMemo(() => {
+    if (!graphResult || !selectedGraphNode) {
+      return null;
+    }
+    const incoming = graphResult.analysis.dag_edges.filter(
+      (edge) => edge.target === selectedGraphNode.id
+    );
+    const outgoing = graphResult.analysis.dag_edges.filter(
+      (edge) => edge.source === selectedGraphNode.id
+    );
+    const neighbors = [
+      ...incoming.map((edge) =>
+        graphResult.analysis.dag_nodes.find((node) => node.id === edge.source)?.label || edge.source
+      ),
+      ...outgoing.map((edge) =>
+        graphResult.analysis.dag_nodes.find((node) => node.id === edge.target)?.label || edge.target
+      ),
+    ];
+    const nodeTerms = new Set(normalizeTerms(selectedGraphNode.label));
+    const linkedEvidence = (result?.grounding_evidence || []).filter((evidence) => {
+      const textTerms = normalizeTerms(
+        `${evidence.title} ${evidence.summary} ${evidence.matched_terms.join(" ")}`
+      );
+      return textTerms.some((term) => nodeTerms.has(term));
+    });
+
+    return {
+      incomingCount: incoming.length,
+      outgoingCount: outgoing.length,
+      neighbors: Array.from(new Set(neighbors)).slice(0, 4),
+      linkedEvidence: linkedEvidence.slice(0, 3),
+    };
+  }, [graphResult, result, selectedGraphNode]);
+
+  const buildIncidentBrief = useCallback(() => {
+    const services = affectedServices.length
+      ? affectedServices.join(", ")
+      : "service scope under investigation";
+    const startedAt = incidentStartedAt
+      ? new Date(incidentStartedAt).toLocaleString("en-US", {
+          month: "short",
+          day: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        })
+      : "unknown time";
+    const brief = [
+      `Severity: ${incidentSeverity}. Incident started around ${startedAt}.`,
+      `Primary signal: ${incidentSignal.trim() || "signal details pending."}`,
+      `Customer impact: ${incidentImpact.trim() || "impact details pending."}`,
+      `Recent change context: ${incidentChange.trim() || "change context not available."}`,
+      `Affected services: ${services}.`,
+    ].join(" ");
+    setIncidentSummary(brief);
+  }, [
+    affectedServices,
+    incidentChange,
+    incidentImpact,
+    incidentSeverity,
+    incidentSignal,
+    incidentStartedAt,
+  ]);
+
+  const toggleAffectedService = useCallback((service: string) => {
+    setAffectedServices((current) => {
+      if (current.includes(service)) {
+        return current.filter((item) => item !== service);
+      }
+      return [...current, service];
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!graphResult) {
+      setSelectedNodeId(null);
+      return;
+    }
+    if (
+      !selectedNodeId ||
+      !graphResult.analysis.dag_nodes.some((node) => node.id === selectedNodeId)
+    ) {
+      setSelectedNodeId(graphResult.analysis.dag_nodes[0]?.id ?? null);
+    }
+  }, [graphResult, selectedNodeId]);
+
   const withTenantHeaders = useCallback(
     (headers?: HeadersInit): Headers => {
       const merged = new Headers(headers || {});
@@ -422,6 +570,13 @@ export default function DashboardPage() {
     if (loading) {
       return;
     }
+    const trimmedIncidentSummary = incidentSummary.trim();
+    if (trimmedIncidentSummary.length < 32) {
+      setAnalysisError("Add more incident details before running analysis.");
+      setStatusTone("error");
+      setStatusMessage("Incident brief is too short for reliable analysis.");
+      return;
+    }
     const runId = analysisRunRef.current + 1;
     analysisRunRef.current = runId;
     const abortController = new AbortController();
@@ -446,7 +601,7 @@ export default function DashboardPage() {
         headers: withTenantHeaders({ "Content-Type": "application/json" }),
         signal: abortController.signal,
         body: JSON.stringify({
-          incident_summary: incidentSummary,
+          incident_summary: trimmedIncidentSummary,
           candidate_count: ANALYSIS_CANDIDATE_COUNT,
         }),
       }, ANALYZE_TIMEOUT_MS + 1500);
@@ -730,7 +885,7 @@ export default function DashboardPage() {
               <span className="nidaan-chip">required</span>
             </div>
             <p className="text-sm text-nidaan-muted">
-              Mention symptoms, customer impact, and what changed before the incident.
+              Build a realistic incident brief from telemetry signal, customer impact, and change context.
             </p>
             <div className="mt-4 flex flex-wrap gap-2">
               {INCIDENT_PRESETS.map((preset) => (
@@ -738,6 +893,11 @@ export default function DashboardPage() {
                   key={preset.id}
                   onClick={() => {
                     setSelectedPreset(preset.id);
+                    setIncidentSeverity(preset.severity);
+                    setIncidentSignal(preset.signal);
+                    setIncidentImpact(preset.impact);
+                    setIncidentChange(preset.change);
+                    setAffectedServices(preset.services);
                     setIncidentSummary(preset.summary);
                   }}
                   className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
@@ -750,12 +910,113 @@ export default function DashboardPage() {
                 </button>
               ))}
             </div>
+            <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+              <div className="rounded-xl border border-nidaan-border bg-white p-3">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-nidaan-muted">
+                  Severity
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {["SEV-1", "SEV-2", "SEV-3"].map((level) => (
+                    <button
+                      key={level}
+                      onClick={() => setIncidentSeverity(level)}
+                      className={`rounded-full border px-2.5 py-1 text-xs font-semibold transition ${
+                        incidentSeverity === level
+                          ? "border-nidaan-danger/35 bg-nidaan-danger/10 text-nidaan-danger"
+                          : "border-nidaan-border bg-white text-nidaan-muted hover:border-nidaan-accent/30 hover:text-nidaan-accent-strong"
+                      }`}
+                    >
+                      {level}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="rounded-xl border border-nidaan-border bg-white p-3">
+                <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-nidaan-muted">
+                  Incident Start (local)
+                </label>
+                <input
+                  type="datetime-local"
+                  value={incidentStartedAt}
+                  onChange={(event) => setIncidentStartedAt(event.target.value)}
+                  className="w-full rounded-lg border border-nidaan-border bg-white px-2.5 py-2 text-sm text-nidaan-ink outline-none transition focus:border-nidaan-accent/45 focus:ring-2 focus:ring-nidaan-accent/15"
+                />
+              </div>
+            </div>
+            <div className="mt-3 space-y-2">
+              <label className="block text-xs font-semibold uppercase tracking-wide text-nidaan-muted">
+                Primary Signal
+              </label>
+              <textarea
+                value={incidentSignal}
+                onChange={(event) => setIncidentSignal(event.target.value)}
+                rows={2}
+                className="w-full rounded-xl border border-nidaan-border bg-white p-2.5 text-sm text-nidaan-ink outline-none transition focus:border-nidaan-accent/45 focus:ring-2 focus:ring-nidaan-accent/15"
+                placeholder="What telemetry moved first?"
+              />
+            </div>
+            <div className="mt-3 space-y-2">
+              <label className="block text-xs font-semibold uppercase tracking-wide text-nidaan-muted">
+                Customer Impact
+              </label>
+              <textarea
+                value={incidentImpact}
+                onChange={(event) => setIncidentImpact(event.target.value)}
+                rows={2}
+                className="w-full rounded-xl border border-nidaan-border bg-white p-2.5 text-sm text-nidaan-ink outline-none transition focus:border-nidaan-accent/45 focus:ring-2 focus:ring-nidaan-accent/15"
+                placeholder="What users or workflows are affected?"
+              />
+            </div>
+            <div className="mt-3 space-y-2">
+              <label className="block text-xs font-semibold uppercase tracking-wide text-nidaan-muted">
+                Recent Change Context
+              </label>
+              <textarea
+                value={incidentChange}
+                onChange={(event) => setIncidentChange(event.target.value)}
+                rows={2}
+                className="w-full rounded-xl border border-nidaan-border bg-white p-2.5 text-sm text-nidaan-ink outline-none transition focus:border-nidaan-accent/45 focus:ring-2 focus:ring-nidaan-accent/15"
+                placeholder="What changed before this incident?"
+              />
+            </div>
+            <div className="mt-3">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-nidaan-muted">
+                Affected Services
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {SERVICE_OPTIONS.map((service) => (
+                  <button
+                    key={service}
+                    onClick={() => toggleAffectedService(service)}
+                    className={`rounded-full border px-2.5 py-1 text-xs font-semibold transition ${
+                      affectedServices.includes(service)
+                        ? "border-nidaan-accent/35 bg-nidaan-accent/10 text-nidaan-accent-strong"
+                        : "border-nidaan-border bg-white text-nidaan-muted hover:border-nidaan-accent/30 hover:text-nidaan-accent-strong"
+                    }`}
+                  >
+                    {service}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+              <button
+                onClick={buildIncidentBrief}
+                className="rounded-xl border border-nidaan-border bg-white px-3 py-2 text-xs font-semibold text-nidaan-ink transition hover:border-nidaan-accent/40 hover:text-nidaan-accent"
+              >
+                Build Incident Brief
+              </button>
+              <span className="text-xs text-nidaan-muted">brief length: {incidentSummary.length} chars</span>
+            </div>
+            <label className="mt-3 block text-xs font-semibold uppercase tracking-wide text-nidaan-muted">
+              Final Incident Brief
+            </label>
             <textarea
               value={incidentSummary}
               onChange={(event) => setIncidentSummary(event.target.value)}
-              rows={6}
+              rows={5}
               className="mt-4 w-full rounded-2xl border border-nidaan-border bg-white p-3 text-sm leading-relaxed text-nidaan-ink outline-none transition focus:border-nidaan-accent/45 focus:ring-2 focus:ring-nidaan-accent/15"
-              placeholder="Example: Login requests are retrying. Error rate jumped to 18%. DB connections are near max."
+              placeholder="This brief is sent to the analysis engine."
             />
           </article>
 
@@ -826,17 +1087,90 @@ export default function DashboardPage() {
                   </p>
                 </div>
               ) : graphResult ? (
-                <div className="relative h-full">
-                  <CausalGraph nodes={graphResult.analysis.dag_nodes} edges={graphResult.analysis.dag_edges} />
-                  {loading && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-nidaan-paper/70 backdrop-blur-[1px]">
-                      <div className="rounded-2xl border border-nidaan-accent/25 bg-white/90 px-4 py-2 text-center">
-                        <p className="text-xs font-semibold text-nidaan-accent-strong">
-                          {analysisStage || "Running next analysis..."}
-                        </p>
+                <div className="grid h-full grid-cols-1 lg:grid-cols-[minmax(0,1fr)_280px]">
+                  <div className="relative border-b border-nidaan-border/80 lg:border-b-0 lg:border-r lg:border-nidaan-border/80">
+                    <CausalGraph
+                      nodes={graphResult.analysis.dag_nodes}
+                      edges={graphResult.analysis.dag_edges}
+                      selectedNodeId={selectedNodeId}
+                      onSelectNode={setSelectedNodeId}
+                    />
+                    {loading && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-nidaan-paper/70 backdrop-blur-[1px]">
+                        <div className="rounded-2xl border border-nidaan-accent/25 bg-white/90 px-4 py-2 text-center">
+                          <p className="text-xs font-semibold text-nidaan-accent-strong">
+                            {analysisStage || "Running next analysis..."}
+                          </p>
+                        </div>
                       </div>
+                    )}
+                  </div>
+                  <aside className="flex h-full flex-col gap-3 bg-[#f8fbff] p-4">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-nidaan-muted">
+                        Graph Inspector
+                      </p>
+                      <p className="mt-1 text-sm font-semibold text-nidaan-ink">
+                        {selectedGraphNode?.label || "Select a node"}
+                      </p>
                     </div>
-                  )}
+                    {graphInspector ? (
+                      <>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="rounded-lg border border-nidaan-border bg-white p-2 text-xs">
+                            <p className="nidaan-mono text-nidaan-muted">upstream</p>
+                            <p className="font-semibold text-nidaan-ink">{graphInspector.incomingCount}</p>
+                          </div>
+                          <div className="rounded-lg border border-nidaan-border bg-white p-2 text-xs">
+                            <p className="nidaan-mono text-nidaan-muted">downstream</p>
+                            <p className="font-semibold text-nidaan-ink">{graphInspector.outgoingCount}</p>
+                          </div>
+                        </div>
+                        <div className="rounded-lg border border-nidaan-border bg-white p-3">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-nidaan-muted">
+                            Connected Nodes
+                          </p>
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {graphInspector.neighbors.length ? (
+                              graphInspector.neighbors.map((neighbor) => (
+                                <span
+                                  key={neighbor}
+                                  className="rounded-full border border-nidaan-border bg-[#f6f9fd] px-2 py-1 text-[11px] text-nidaan-ink"
+                                >
+                                  {neighbor}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="text-xs text-nidaan-muted">No direct neighbors.</span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="rounded-lg border border-nidaan-border bg-white p-3">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-nidaan-muted">
+                            Linked Evidence
+                          </p>
+                          <div className="mt-2 space-y-2">
+                            {graphInspector.linkedEvidence.length ? (
+                              graphInspector.linkedEvidence.map((evidence) => (
+                                <div key={evidence.id} className="rounded-md border border-nidaan-border bg-[#f9fcff] p-2">
+                                  <p className="text-xs font-semibold text-nidaan-ink">{evidence.title}</p>
+                                  <p className="mt-1 text-[11px] text-nidaan-muted">{evidence.summary}</p>
+                                </div>
+                              ))
+                            ) : (
+                              <p className="text-xs text-nidaan-muted">
+                                No direct lexical match. Use node labels to inspect adjacent causes.
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <p className="text-xs text-nidaan-muted">
+                        Select a graph node to inspect upstream/downstream relations and evidence alignment.
+                      </p>
+                    )}
+                  </aside>
                 </div>
               ) : analysisError ? (
                 <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
@@ -847,9 +1181,9 @@ export default function DashboardPage() {
                 </div>
               ) : (
                 <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
-                  <div className="nidaan-display text-5xl text-nidaan-accent/30">DAG</div>
+                  <div className="nidaan-display text-4xl text-nidaan-accent/35">Causal Graph</div>
                   <p className="max-w-md text-sm text-nidaan-muted">
-                    Analysis output will appear here with root cause and intervention path.
+                    Your graph workspace will show connected causes, impact path, and evidence-linked nodes.
                   </p>
                 </div>
               )}
