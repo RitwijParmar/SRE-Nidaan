@@ -384,8 +384,10 @@ function buildLocalFallbackResult(
 }
 
 export default function DashboardPage() {
-  const BODY_BASE = "/body";
+  const configuredBodyBase = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/$/, "");
+  const BODY_BASE = configuredBodyBase || "/body";
   const API_BASE = "/api";
+  const DIRECT_API_BASE = configuredBodyBase ? `${configuredBodyBase}/api` : API_BASE;
   const [result, setResult] = useState<IncidentResult | null>(null);
   const [health, setHealth] = useState<HealthPayload | null>(null);
   const [brainHealth, setBrainHealth] = useState<BrainHealthPayload | null>(null);
@@ -636,7 +638,7 @@ export default function DashboardPage() {
     setStatusMessage("Running grounded causal analysis...");
 
     try {
-      const response = await fetchWithTimeout(`${API_BASE}/analyze-incident`, {
+      const response = await fetchWithTimeout(`${DIRECT_API_BASE}/analyze-incident`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         signal: abortController.signal,
@@ -699,7 +701,7 @@ export default function DashboardPage() {
         setAnalysisStage(null);
       }
     }
-  }, [API_BASE, candidateCount, incidentSummary, loading, pollRefutation, telemetry]);
+  }, [DIRECT_API_BASE, candidateCount, incidentSummary, loading, pollRefutation, telemetry]);
 
   const stopAnalysis = useCallback(() => {
     if (analysisAbortRef.current) {
@@ -718,7 +720,7 @@ export default function DashboardPage() {
       setFeedbackSubmitting(true);
       setFeedbackStatus(null);
       try {
-        const response = await fetchWithTimeout(`${API_BASE}/analysis-feedback`, {
+        const response = await fetchWithTimeout(`${DIRECT_API_BASE}/analysis-feedback`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -751,7 +753,7 @@ export default function DashboardPage() {
         setFeedbackSubmitting(false);
       }
     },
-    [API_BASE, feedbackNote, incidentSummary, result]
+    [DIRECT_API_BASE, feedbackNote, incidentSummary, result]
   );
 
   return (
