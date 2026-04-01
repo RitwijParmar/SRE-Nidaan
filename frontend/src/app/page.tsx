@@ -797,7 +797,6 @@ export default function DashboardPage() {
               className="h-12 w-12 rounded-2xl border border-white/80 shadow-md md:h-14 md:w-14"
             />
             <div>
-              <p className="nidaan-mono text-[10px] uppercase tracking-[0.16em] text-nidaan-muted">SRE NIDAAN PLATFORM</p>
               <h1 className="nidaan-display text-2xl font-semibold text-nidaan-ink md:text-[31px]">
                 SRE निदान Command Deck
               </h1>
