@@ -262,8 +262,9 @@ function buildLocalFallbackResult(
 }
 
 export default function DashboardPage() {
-  const API_BASE = "/api";
-  const BODY_BASE = "/body";
+  const configuredBodyBase = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/$/, "");
+  const BODY_BASE = configuredBodyBase || "/body";
+  const API_BASE = configuredBodyBase ? `${configuredBodyBase}/api` : "/api";
   const [result, setResult] = useState<IncidentResult | null>(null);
   const [health, setHealth] = useState<HealthPayload | null>(null);
   const [brainHealth, setBrainHealth] = useState<BrainHealthPayload | null>(null);
