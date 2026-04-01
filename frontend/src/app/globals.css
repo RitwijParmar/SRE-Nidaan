@@ -5,17 +5,17 @@
 @import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700;800&family=Sora:wght@500;600;700;800&display=swap");
 
 :root {
-  --nidaan-shell: #edf3fb;
-  --nidaan-paper: #f7fbff;
-  --nidaan-panel: #e9f1fb;
-  --nidaan-ink: #10233a;
-  --nidaan-muted: #4f647d;
-  --nidaan-accent: #0a7a74;
-  --nidaan-accent-strong: #1459b0;
-  --nidaan-success: #17855a;
-  --nidaan-warning: #b97721;
-  --nidaan-danger: #c3463a;
-  --nidaan-border: #d0deed;
+  --nidaan-shell: #f1f5fb;
+  --nidaan-paper: #ffffff;
+  --nidaan-panel: #eef4fb;
+  --nidaan-ink: #0f2238;
+  --nidaan-muted: #445b75;
+  --nidaan-accent: #0d6e69;
+  --nidaan-accent-strong: #1a4f9f;
+  --nidaan-success: #0f8a5f;
+  --nidaan-warning: #b76a12;
+  --nidaan-danger: #c0372f;
+  --nidaan-border: #cad8e8;
 }
 
 * {
@@ -53,16 +53,16 @@ a {
 }
 
 ::-webkit-scrollbar-track {
-  background: #edf4fb;
+  background: #e8eff8;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #adc2d8;
+  background: #a8bcd3;
   border-radius: 20px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #8ea8c0;
+  background: #8aa4c2;
 }
 
 .nidaan-shell {
@@ -70,9 +70,9 @@ a {
   isolation: isolate;
   overflow: clip;
   background:
-    radial-gradient(circle at 8% -10%, rgba(20, 89, 176, 0.22), transparent 40%),
-    radial-gradient(circle at 94% 0%, rgba(10, 122, 116, 0.18), transparent 38%),
-    linear-gradient(180deg, #f8fbff 0%, #edf3fb 100%);
+    radial-gradient(circle at 8% -10%, rgba(26, 79, 159, 0.18), transparent 40%),
+    radial-gradient(circle at 94% 0%, rgba(13, 110, 105, 0.14), transparent 38%),
+    linear-gradient(180deg, #f8fbff 0%, #f1f5fb 100%);
 }
 
 .nidaan-glow {
@@ -81,7 +81,7 @@ a {
   pointer-events: none;
   border-radius: 999px;
   filter: blur(86px);
-  opacity: 0.32;
+  opacity: 0.26;
   transform: translateZ(0);
 }
 
@@ -90,7 +90,7 @@ a {
   height: 360px;
   left: -90px;
   top: 48px;
-  background: rgba(20, 89, 176, 0.2);
+  background: rgba(26, 79, 159, 0.18);
 }
 
 .nidaan-glow-right {
@@ -98,16 +98,16 @@ a {
   height: 320px;
   right: -90px;
   top: 124px;
-  background: rgba(10, 122, 116, 0.2);
+  background: rgba(13, 110, 105, 0.16);
 }
 
 .nidaan-card {
   position: relative;
   z-index: 1;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(249, 252, 255, 0.96));
-  border: 1px solid rgba(208, 222, 237, 0.92);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(250, 252, 255, 0.98));
+  border: 1px solid rgba(202, 216, 232, 0.9);
   border-radius: 22px;
-  box-shadow: 0 18px 40px rgba(15, 35, 58, 0.08);
+  box-shadow: 0 14px 32px rgba(15, 35, 58, 0.08);
 }
 
 .nidaan-display {
@@ -123,9 +123,9 @@ a {
   display: inline-flex;
   align-items: center;
   border-radius: 999px;
-  border: 1px solid rgba(20, 89, 176, 0.24);
-  background: rgba(20, 89, 176, 0.1);
-  color: #1b4f8f;
+  border: 1px solid rgba(26, 79, 159, 0.22);
+  background: rgba(26, 79, 159, 0.1);
+  color: #15427a;
   padding: 0.3rem 0.64rem;
   font-size: 10px;
   font-weight: 800;
@@ -138,7 +138,7 @@ a {
   align-items: center;
   gap: 0.4rem;
   border-radius: 999px;
-  border: 1px solid rgba(208, 222, 237, 0.96);
+  border: 1px solid rgba(202, 216, 232, 0.96);
   background: rgba(255, 255, 255, 0.9);
   padding: 0.3rem 0.68rem;
   font-family: "JetBrains Mono", monospace;
@@ -169,29 +169,29 @@ a {
 }
 
 .react-flow__background {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(236, 245, 255, 0.98) 100%) !important;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(239, 246, 255, 0.98) 100%) !important;
 }
 
 .react-flow__controls {
-  border: 1px solid #cfdef0 !important;
+  border: 1px solid #cad8e8 !important;
   border-radius: 10px !important;
   background: rgba(255, 255, 255, 0.94) !important;
   box-shadow: 0 10px 24px rgba(18, 32, 51, 0.1);
 }
 
 .react-flow__controls-button {
-  border-color: #cfdef0 !important;
+  border-color: #cad8e8 !important;
   background: rgba(255, 255, 255, 0.94) !important;
   fill: #4f647d !important;
 }
 
 .react-flow__controls-button:hover {
-  background: #eaf2fd !important;
+  background: #edf3fc !important;
   fill: #10233a !important;
 }
 
 .react-flow__minimap {
-  border: 1px solid #cfdef0 !important;
+  border: 1px solid #cad8e8 !important;
   border-radius: 10px !important;
   background: rgba(255, 255, 255, 0.94) !important;
 }

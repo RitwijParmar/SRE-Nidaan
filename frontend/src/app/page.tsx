@@ -781,6 +781,35 @@ export default function DashboardPage() {
   const backendState = integrationCheck?.body === "online" || health ? "online" : "offline";
   const frontendState = integrationCheck?.face === "offline" ? "offline" : "online";
   const aiState = integrationCheck?.brain ?? "unknown";
+  const frontendCardTone =
+    frontendState === "online"
+      ? "border-emerald-200 bg-emerald-50/80"
+      : "border-rose-200 bg-rose-50/80";
+  const backendCardTone =
+    backendState === "online"
+      ? "border-emerald-200 bg-emerald-50/80"
+      : "border-rose-200 bg-rose-50/80";
+  const dataCardTone =
+    telemetryState === "online"
+      ? "border-emerald-200 bg-emerald-50/80"
+      : telemetryState === "online_simulated"
+        ? "border-amber-200 bg-amber-50/80"
+        : "border-rose-200 bg-rose-50/80";
+  const aiCardTone =
+    aiState === "ready"
+      ? "border-emerald-200 bg-emerald-50/80"
+      : aiState === "warming"
+        ? "border-amber-200 bg-amber-50/80"
+        : "border-rose-200 bg-rose-50/80";
+  const statusBadgeClass = (value: "online" | "offline" | "simulated" | "ready" | "warming" | "unknown" | "error") => {
+    if (value === "online" || value === "ready") {
+      return "border-emerald-200 bg-emerald-50 text-emerald-700";
+    }
+    if (value === "warming" || value === "simulated") {
+      return "border-amber-200 bg-amber-50 text-amber-700";
+    }
+    return "border-rose-200 bg-rose-50 text-rose-700";
+  };
 
   return (
     <div className="nidaan-shell min-h-screen text-nidaan-ink">
@@ -814,7 +843,7 @@ export default function DashboardPage() {
               id="analyze-incident-btn"
               onClick={analyzeIncident}
               disabled={loading}
-              className="rounded-xl bg-gradient-to-r from-nidaan-accent to-nidaan-accent-strong px-4 py-2.5 text-sm font-semibold text-white shadow-md shadow-nidaan-accent/30 transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-55"
+              className="rounded-xl bg-gradient-to-r from-nidaan-accent to-nidaan-accent-strong px-4 py-2.5 text-sm font-semibold text-white shadow-md shadow-nidaan-accent/35 transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-55"
             >
               {loading ? "Analyzing..." : "Analyze Incident"}
             </button>
@@ -848,23 +877,23 @@ export default function DashboardPage() {
       </header>
 
       <div className="mx-auto w-full max-w-[1400px] px-4 pt-4 lg:px-6">
-        <div className={`nidaan-card border ${runtimeToneClass} p-4`}>
+        <div className={`nidaan-card border ${runtimeToneClass} bg-white p-4`}>
           <p className="mb-3 text-sm font-semibold text-nidaan-ink">{statusMessage}</p>
           <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-            <div className="rounded-xl border border-nidaan-border bg-white px-3 py-2">
-              <p className="nidaan-mono text-[10px] text-nidaan-muted">frontend</p>
+            <div className={`rounded-xl border px-3 py-2 ${frontendCardTone}`}>
+              <p className="nidaan-mono text-[10px] font-semibold uppercase tracking-wide text-nidaan-muted">frontend</p>
               <p className={`text-sm font-semibold ${frontendState === "online" ? "text-nidaan-success" : "text-nidaan-danger"}`}>{frontendState}</p>
             </div>
-            <div className="rounded-xl border border-nidaan-border bg-white px-3 py-2">
-              <p className="nidaan-mono text-[10px] text-nidaan-muted">backend</p>
+            <div className={`rounded-xl border px-3 py-2 ${backendCardTone}`}>
+              <p className="nidaan-mono text-[10px] font-semibold uppercase tracking-wide text-nidaan-muted">backend</p>
               <p className={`text-sm font-semibold ${backendState === "online" ? "text-nidaan-success" : "text-nidaan-danger"}`}>{backendState}</p>
             </div>
-            <div className="rounded-xl border border-nidaan-border bg-white px-3 py-2">
-              <p className="nidaan-mono text-[10px] text-nidaan-muted">data feed</p>
+            <div className={`rounded-xl border px-3 py-2 ${dataCardTone}`}>
+              <p className="nidaan-mono text-[10px] font-semibold uppercase tracking-wide text-nidaan-muted">data feed</p>
               <p className={`text-sm font-semibold ${telemetryState === "online" ? "text-nidaan-success" : telemetryState === "online_simulated" ? "text-nidaan-warning" : "text-nidaan-danger"}`}>{telemetryLabel}</p>
             </div>
-            <div className="rounded-xl border border-nidaan-border bg-white px-3 py-2">
-              <p className="nidaan-mono text-[10px] text-nidaan-muted">ai engine</p>
+            <div className={`rounded-xl border px-3 py-2 ${aiCardTone}`}>
+              <p className="nidaan-mono text-[10px] font-semibold uppercase tracking-wide text-nidaan-muted">ai engine</p>
               <p className={`text-sm font-semibold ${aiState === "ready" ? "text-nidaan-success" : aiState === "warming" ? "text-nidaan-warning" : "text-nidaan-danger"}`}>{aiState}</p>
             </div>
           </div>
@@ -1026,9 +1055,15 @@ export default function DashboardPage() {
               <span className="nidaan-chip">live status</span>
             </div>
             <div className="space-y-2 text-sm text-nidaan-muted">
-              <p>Platform: <span className="font-semibold text-nidaan-ink">{integrationCheck?.body === "online" ? "Connected" : "Checking..."}</span></p>
-              <p>Data Feed: <span className={`font-semibold ${telemetryState === "online" ? "text-nidaan-success" : telemetryState === "online_simulated" ? "text-nidaan-warning" : "text-nidaan-danger"}`}>{telemetryLabel}</span></p>
-              <p>AI Engine: <span className="font-semibold text-nidaan-ink">{integrationCheck?.brain ?? "checking..."}</span></p>
+              <p className="flex items-center justify-between gap-3">Platform:
+                <span className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${statusBadgeClass(backendState)}`}>{backendState === "online" ? "connected" : "offline"}</span>
+              </p>
+              <p className="flex items-center justify-between gap-3">Data Feed:
+                <span className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${statusBadgeClass(telemetryState === "online_simulated" ? "simulated" : telemetryState)}`}>{telemetryLabel}</span>
+              </p>
+              <p className="flex items-center justify-between gap-3">AI Engine:
+                <span className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${statusBadgeClass(aiState)}`}>{aiState}</span>
+              </p>
               <p>Observed Services: <span className="font-semibold text-nidaan-ink">{telemetryServiceCount || "not yet"}</span></p>
               <p>Last Check: <span className="font-semibold text-nidaan-ink">{integrationCheck?.checked_at ? shortTimestamp(integrationCheck.checked_at) : "not yet"}</span></p>
             </div>
