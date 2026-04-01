@@ -5,17 +5,17 @@
 @import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Sora:wght@500;600;700;800&display=swap");
 
 :root {
-  --nidaan-shell: #f3eee5;
-  --nidaan-paper: #fffefb;
-  --nidaan-panel: #f8f4ec;
-  --nidaan-ink: #1f2a36;
-  --nidaan-muted: #5e6773;
-  --nidaan-accent: #0f766e;
-  --nidaan-accent-strong: #0b5e58;
-  --nidaan-success: #1f8f67;
-  --nidaan-warning: #c8791f;
-  --nidaan-danger: #bc4938;
-  --nidaan-border: #d9d9d1;
+  --nidaan-shell: #f3f7fb;
+  --nidaan-paper: #ffffff;
+  --nidaan-panel: #edf4fb;
+  --nidaan-ink: #122033;
+  --nidaan-muted: #526174;
+  --nidaan-accent: #0b7a75;
+  --nidaan-accent-strong: #0e5cb5;
+  --nidaan-success: #17855a;
+  --nidaan-warning: #c07821;
+  --nidaan-danger: #c24236;
+  --nidaan-border: #d6e1ec;
 }
 
 * {
@@ -70,9 +70,9 @@ a {
   isolation: isolate;
   overflow: clip;
   background:
-    linear-gradient(180deg, #fbf8f2 0%, #f3eee5 100%),
-    radial-gradient(circle at 12% 14%, rgba(15, 118, 110, 0.15), transparent 40%),
-    radial-gradient(circle at 88% 0%, rgba(188, 73, 56, 0.11), transparent 35%);
+    linear-gradient(180deg, #f9fcff 0%, #f3f7fb 100%),
+    radial-gradient(circle at 8% 12%, rgba(14, 92, 181, 0.12), transparent 42%),
+    radial-gradient(circle at 92% 0%, rgba(11, 122, 117, 0.12), transparent 40%);
 }
 
 .nidaan-glow {
@@ -90,7 +90,7 @@ a {
   height: 320px;
   left: -60px;
   top: 80px;
-  background: rgba(15, 118, 110, 0.22);
+  background: rgba(14, 92, 181, 0.2);
 }
 
 .nidaan-glow-right {
@@ -98,17 +98,17 @@ a {
   height: 280px;
   right: -40px;
   top: 140px;
-  background: rgba(188, 73, 56, 0.2);
+  background: rgba(11, 122, 117, 0.18);
 }
 
 .nidaan-card {
   position: relative;
   z-index: 1;
-  background: rgba(255, 255, 255, 0.76);
-  border: 1px solid rgba(217, 217, 209, 0.95);
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(214, 225, 236, 0.96);
   border-radius: 20px;
-  backdrop-filter: blur(12px);
-  box-shadow: 0 14px 34px rgba(31, 42, 54, 0.08);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 12px 30px rgba(18, 32, 51, 0.08);
 }
 
 .nidaan-display {
@@ -123,14 +123,33 @@ a {
   display: inline-flex;
   align-items: center;
   border-radius: 999px;
-  border: 1px solid rgba(15, 118, 110, 0.25);
-  background: rgba(15, 118, 110, 0.1);
-  color: #0b5e58;
+  border: 1px solid rgba(14, 92, 181, 0.2);
+  background: rgba(14, 92, 181, 0.08);
+  color: #114d8f;
   padding: 0.28rem 0.6rem;
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
+}
+
+.nidaan-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border-radius: 999px;
+  border: 1px solid var(--nidaan-border);
+  background: #fff;
+  padding: 0.28rem 0.62rem;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.03em;
+}
+
+.nidaan-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
 }
 
 .animate-beacon {
@@ -149,35 +168,35 @@ a {
 }
 
 .react-flow__background {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.84) 0%, rgba(248, 244, 236, 0.84) 100%) !important;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(237, 244, 251, 0.96) 100%) !important;
 }
 
 .react-flow__controls {
-  border: 1px solid #d9d9d1 !important;
+  border: 1px solid #d6e1ec !important;
   border-radius: 10px !important;
   background: rgba(255, 255, 255, 0.92) !important;
-  box-shadow: 0 8px 20px rgba(31, 42, 54, 0.08);
+  box-shadow: 0 8px 20px rgba(18, 32, 51, 0.08);
 }
 
 .react-flow__controls-button {
-  border-color: #d9d9d1 !important;
+  border-color: #d6e1ec !important;
   background: rgba(255, 255, 255, 0.92) !important;
-  fill: #5e6773 !important;
+  fill: #526174 !important;
 }
 
 .react-flow__controls-button:hover {
-  background: #f4eee4 !important;
-  fill: #1f2a36 !important;
+  background: #edf4fb !important;
+  fill: #122033 !important;
 }
 
 .react-flow__minimap {
-  border: 1px solid #d9d9d1 !important;
+  border: 1px solid #d6e1ec !important;
   border-radius: 10px !important;
   background: rgba(255, 255, 255, 0.9) !important;
 }
 
 .react-flow__edge-path {
-  stroke: #0f766e !important;
+  stroke: #0b7a75 !important;
   stroke-width: 2 !important;
 }
 

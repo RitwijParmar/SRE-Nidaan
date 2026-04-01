@@ -40,16 +40,16 @@ function CausalNode({ data }: { data: { label: string } }) {
       <Handle
         type="target"
         position={Position.Top}
-        className="!h-2.5 !w-2.5 !border-[#0f766e] !bg-[#0f766e]"
+        className="!h-2.5 !w-2.5 !border-[#0b7a75] !bg-[#0b7a75]"
       />
-      <div className="min-w-[175px] cursor-default rounded-2xl border border-[#0f766e]/35 bg-gradient-to-br from-[#fefcf7] to-[#f3ede1] px-5 py-3 text-center shadow-md shadow-[#1f2a36]/10 transition-all duration-300 group-hover:border-[#0f766e]/55 group-hover:shadow-lg group-hover:shadow-[#1f2a36]/15">
-        <span className="text-sm font-semibold text-[#1f2a36]">{data.label}</span>
-        <div className="pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-t from-[#0f766e]/5 to-transparent" />
+      <div className="min-w-[180px] cursor-default rounded-2xl border border-[#0e5cb5]/30 bg-gradient-to-br from-[#ffffff] to-[#eef5ff] px-5 py-3 text-center shadow-md shadow-[#122033]/10 transition-all duration-200 group-hover:border-[#0b7a75]/55 group-hover:shadow-lg group-hover:shadow-[#122033]/15">
+        <span className="text-sm font-semibold text-[#122033]">{data.label}</span>
+        <div className="pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-t from-[#0e5cb5]/5 to-transparent" />
       </div>
       <Handle
         type="source"
         position={Position.Bottom}
-        className="!h-2.5 !w-2.5 !border-[#0f766e] !bg-[#0f766e]"
+        className="!h-2.5 !w-2.5 !border-[#0b7a75] !bg-[#0b7a75]"
       />
     </div>
   );
@@ -118,12 +118,12 @@ export default function CausalGraph({ nodes: rawNodes, edges: rawEdges }: Causal
       target: edge.target,
       animated: edge.animated,
       style: {
-        stroke: "#0f766e",
+        stroke: "#0b7a75",
         strokeWidth: 2,
       },
       markerEnd: {
         type: "arrowclosed" as const,
-        color: "#0f766e",
+        color: "#0b7a75",
         width: 20,
         height: 20,
       },
@@ -156,13 +156,13 @@ export default function CausalGraph({ nodes: rawNodes, edges: rawEdges }: Causal
           onClick={() => onLayout("TB")}
           className="rounded-md border border-nidaan-border bg-white px-2.5 py-1 nidaan-mono text-[10px] text-nidaan-muted transition hover:border-nidaan-accent/35 hover:text-nidaan-accent-strong"
         >
-          Vertical
+          Top-Down
         </button>
         <button
           onClick={() => onLayout("LR")}
           className="rounded-md border border-nidaan-border bg-white px-2.5 py-1 nidaan-mono text-[10px] text-nidaan-muted transition hover:border-nidaan-accent/35 hover:text-nidaan-accent-strong"
         >
-          Horizontal
+          Left-Right
         </button>
       </div>
 
@@ -179,7 +179,7 @@ export default function CausalGraph({ nodes: rawNodes, edges: rawEdges }: Causal
         attributionPosition="bottom-left"
         proOptions={{ hideAttribution: true }}
       >
-        <Background color="#ddd6c8" gap={22} size={1} />
+        <Background color="#d7e4f0" gap={22} size={1} />
         <Controls position="bottom-right" showInteractive={false} />
         <MiniMap
           position="bottom-left"

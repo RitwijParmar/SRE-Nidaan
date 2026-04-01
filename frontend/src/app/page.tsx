@@ -122,15 +122,6 @@ interface InterventionAuthorizationAck {
   timestamp: string;
 }
 
-const STATIC_TELEMETRY: Record<string, Record<string, string | number>> = {
-  frontend: { status: "503 Gateway Timeout", error_rate: "Spiking" },
-  auth_service: { cpu_utilization: "96%", latency_ms: 4500, replicas: 5 },
-  database: {
-    connections: "990/1000 (99%)",
-    wait_event: "ClientRead (Locked)",
-  },
-};
-
 const INCIDENT_PRESETS = [
   {
     id: "auth-retry-storm",
@@ -155,60 +146,6 @@ const INCIDENT_PRESETS = [
 const NETWORK_TIMEOUT_MS = 12000;
 const REFUTATION_TIMEOUT_MS = 5000;
 const ANALYZE_TIMEOUT_MS = 40000;
-
-function prettifyLabel(value: string): string {
-  return value.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
-}
-
-function metricLooksCritical(value: string | number): boolean {
-  if (typeof value === "number") {
-    return value >= 90;
-  }
-  const compact = value.toLowerCase();
-  return (
-    compact.includes("503") ||
-    compact.includes("spiking") ||
-    compact.includes("99%") ||
-    compact.includes("96%") ||
-    compact.includes("locked")
-  );
-}
-
-function serviceTone(service: string): {
-  border: string;
-  title: string;
-  badge: string;
-  badgeClass: string;
-} {
-  const map: Record<string, { border: string; title: string; badge: string; badgeClass: string }> = {
-    frontend: {
-      border: "border-nidaan-danger/35",
-      title: "text-nidaan-danger",
-      badge: "critical",
-      badgeClass: "bg-nidaan-danger/10 text-nidaan-danger border-nidaan-danger/25",
-    },
-    auth_service: {
-      border: "border-nidaan-warning/35",
-      title: "text-nidaan-warning",
-      badge: "warning",
-      badgeClass: "bg-nidaan-warning/10 text-nidaan-warning border-nidaan-warning/25",
-    },
-    database: {
-      border: "border-nidaan-danger/35",
-      title: "text-nidaan-danger",
-      badge: "critical",
-      badgeClass: "bg-nidaan-danger/10 text-nidaan-danger border-nidaan-danger/25",
-    },
-  };
-  return (
-    map[service] ?? {
-      border: "border-nidaan-border",
-      title: "text-nidaan-accent",
-      badge: "info",
-      badgeClass: "bg-nidaan-accent/10 text-nidaan-accent border-nidaan-accent/25",
-    }
-  );
-}
 
 function shortTimestamp(value: string): string {
   const parsed = Date.parse(value);
@@ -354,7 +291,6 @@ export default function DashboardPage() {
   const [statusTone, setStatusTone] = useState<"info" | "success" | "error">("info");
   const [refutation, setRefutation] = useState<Record<string, unknown> | null>(null);
   const [integrationCheck, setIntegrationCheck] = useState<IntegrationCheck | null>(null);
-  const [integrationSnapshot, setIntegrationSnapshot] = useState<IntegrationSnapshot | null>(null);
   const [checkingIntegration, setCheckingIntegration] = useState(false);
   const [integrationCheckMessage, setIntegrationCheckMessage] = useState<string | null>(null);
   const analysisAbortRef = useRef<AbortController | null>(null);
@@ -362,7 +298,6 @@ export default function DashboardPage() {
   const latestHealthRef = useRef<HealthPayload | null>(null);
   const didBootstrapRef = useRef(false);
 
-  const telemetryView = result?.telemetry_snapshot ?? telemetry ?? STATIC_TELEMETRY;
   const graphResult = useMemo(
     () => (result ? ensureRenderableIncidentResult(result) : null),
     [result]
@@ -479,7 +414,6 @@ export default function DashboardPage() {
 
         if (integrationRes.ok) {
           const integrationPayload = (await integrationRes.json()) as IntegrationSnapshot;
-          setIntegrationSnapshot(integrationPayload);
           checkedAt = integrationPayload.checked_at || checkedAt;
           faceStatus = normalizeOnlineState(integrationPayload.services?.face, "online");
           bodyStatus = normalizeOnlineState(integrationPayload.services?.body, "online");
@@ -494,7 +428,6 @@ export default function DashboardPage() {
             `Integration ${integrationPayload.status} · checked ${shortTimestamp(checkedAt)} · brain ${brainStatus} · telemetry ${telemetryStatus.replace("_", "-")}.`
           );
         } else {
-          setIntegrationSnapshot(null);
           setIntegrationCheckMessage(
             `Checked ${shortTimestamp(checkedAt)} · diagnostics endpoint unavailable (${integrationRes.status}).`
           );
@@ -509,7 +442,6 @@ export default function DashboardPage() {
         });
       } catch {
         const checkedAt = new Date().toISOString();
-        setIntegrationSnapshot(null);
         setIntegrationCheck({
           face: "online",
           body: "offline",
@@ -775,49 +707,59 @@ export default function DashboardPage() {
     withTenantHeaders,
   ]);
 
+  const telemetryState = integrationCheck?.telemetry ?? "offline";
+  const telemetryLabel =
+    telemetryState === "online"
+      ? "live"
+      : telemetryState === "online_simulated"
+        ? "simulated"
+        : "offline";
+  const runtimeToneClass =
+    statusTone === "success"
+      ? "border-nidaan-success/35"
+      : statusTone === "error"
+        ? "border-nidaan-danger/35"
+        : "border-nidaan-accent/25";
+  const telemetryServiceCount = Object.keys(telemetry ?? {}).length;
+
   return (
     <div className="nidaan-shell min-h-screen text-nidaan-ink">
       <div className="nidaan-glow nidaan-glow-left" />
       <div className="nidaan-glow nidaan-glow-right" />
 
-      <header className="sticky top-0 z-50 border-b border-nidaan-border/80 bg-nidaan-paper/75 backdrop-blur-xl">
-        <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-4 px-5 py-4 lg:flex-row lg:items-center lg:justify-between lg:px-8">
-          <div className="flex items-start gap-4">
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-nidaan-accent to-nidaan-accent-strong shadow-lg shadow-nidaan-accent/35">
-              <span className="nidaan-display text-lg font-bold text-white">N</span>
-            </div>
+      <header className="sticky top-0 z-50 border-b border-nidaan-border/80 bg-nidaan-paper/90 backdrop-blur-xl">
+        <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-4 px-4 py-4 lg:flex-row lg:items-center lg:justify-between lg:px-6">
+          <div className="flex items-start gap-3">
+            <img
+              src="/sre-nidaan-mark.svg"
+              alt="SRE Nidaan logo"
+              className="h-12 w-12 rounded-2xl border border-white/80 shadow-md"
+            />
             <div>
-              <p className="nidaan-mono text-[11px] uppercase tracking-[0.2em] text-nidaan-muted">
-                SRE-Nidaan Command Deck
-              </p>
-              <h1 className="nidaan-display text-2xl font-semibold text-nidaan-ink md:text-3xl">
-                Causal Incident Response Copilot
+              <p className="nidaan-mono text-[10px] uppercase tracking-[0.16em] text-nidaan-muted">SRE-Nidaan</p>
+              <h1 className="nidaan-display text-2xl font-semibold text-nidaan-ink md:text-[30px]">
+                Incident Response Command Center
               </h1>
-              <p className="max-w-3xl text-sm text-nidaan-muted">
-                Grounded root-cause analysis, intervention safety gating, and operator feedback loops in one live product surface.
+              <p className="text-sm font-medium text-nidaan-accent">एसआरई निदान</p>
+              <p className="text-sm text-nidaan-muted">
+                Describe incident. Run analysis. Approve safely. Capture feedback.
               </p>
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
-            <button
-              onClick={() => setExpertMode((value) => !value)}
-              className="rounded-full border border-nidaan-border bg-white px-4 py-2 text-sm font-medium text-nidaan-ink transition hover:border-nidaan-accent/40 hover:text-nidaan-accent"
-            >
-              {expertMode ? "Expert: On" : "Expert: Off"}
-            </button>
+          <div className="flex flex-wrap items-center gap-2">
             <button
               id="analyze-incident-btn"
               onClick={analyzeIncident}
               disabled={loading}
-              className="rounded-full bg-gradient-to-r from-nidaan-accent to-nidaan-accent-strong px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-nidaan-accent/25 transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-55"
+              className="rounded-xl bg-gradient-to-r from-nidaan-accent to-nidaan-accent-strong px-4 py-2.5 text-sm font-semibold text-white shadow-md shadow-nidaan-accent/25 transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-55"
             >
               {loading ? "Analyzing..." : "Analyze Incident"}
             </button>
             {loading && (
               <button
                 onClick={stopAnalysis}
-                className="rounded-full border border-nidaan-danger/35 bg-nidaan-danger/10 px-4 py-2 text-sm font-semibold text-nidaan-danger transition hover:bg-nidaan-danger/15"
+                className="rounded-xl border border-nidaan-danger/35 bg-nidaan-danger/10 px-3 py-2 text-sm font-semibold text-nidaan-danger transition hover:bg-nidaan-danger/15"
               >
                 Stop
               </button>
@@ -834,49 +776,74 @@ export default function DashboardPage() {
                 })();
               }}
               disabled={refreshingRuntime || checkingIntegration}
-              className="rounded-full border border-nidaan-border bg-white px-4 py-2 text-sm font-medium text-nidaan-ink transition hover:border-nidaan-accent/40 hover:text-nidaan-accent disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-xl border border-nidaan-border bg-white px-3 py-2 text-sm font-medium text-nidaan-ink transition hover:border-nidaan-accent/40 hover:text-nidaan-accent disabled:cursor-not-allowed disabled:opacity-60"
             >
               {refreshingRuntime || checkingIntegration ? "Refreshing..." : "Refresh Runtime"}
             </button>
-            {expertMode && (
-              <a
-                href={`${BODY_BASE}/docs`}
-                className="rounded-full border border-nidaan-border bg-white px-4 py-2 text-sm font-medium text-nidaan-ink transition hover:border-nidaan-accent/40 hover:text-nidaan-accent"
-              >
-                API Docs
-              </a>
-            )}
-            {expertMode && (
-              <button
-                onClick={() => {
-                  void runIntegrationCheck(health);
-                }}
-                disabled={checkingIntegration || refreshingRuntime}
-                className="rounded-full border border-nidaan-border bg-white px-4 py-2 text-sm font-medium text-nidaan-ink transition hover:border-nidaan-accent/40 hover:text-nidaan-accent disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {checkingIntegration ? "Checking..." : "Integration Check"}
-              </button>
-            )}
+            <button
+              onClick={() => {
+                void runIntegrationCheck(health);
+              }}
+              disabled={checkingIntegration || refreshingRuntime}
+              className="rounded-xl border border-nidaan-border bg-white px-3 py-2 text-sm font-medium text-nidaan-ink transition hover:border-nidaan-accent/40 hover:text-nidaan-accent disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {checkingIntegration ? "Checking..." : "Integration Check"}
+            </button>
+            <button
+              onClick={() => setExpertMode((value) => !value)}
+              className="rounded-xl border border-nidaan-border bg-white px-3 py-2 text-sm font-medium text-nidaan-ink transition hover:border-nidaan-accent/40 hover:text-nidaan-accent"
+            >
+              {expertMode ? "Advanced: On" : "Advanced: Off"}
+            </button>
           </div>
-          {integrationCheckMessage && (
-            <p className="nidaan-mono text-[11px] text-nidaan-muted lg:text-right">
-              {integrationCheckMessage}
-            </p>
-          )}
         </div>
       </header>
 
-      <main className="mx-auto grid w-full max-w-[1600px] grid-cols-1 gap-6 px-5 py-6 lg:px-8 xl:grid-cols-12">
+      <div className="mx-auto w-full max-w-[1400px] px-4 pt-4 lg:px-6">
+        <div className={`nidaan-card flex flex-col gap-3 border ${runtimeToneClass} p-4 lg:flex-row lg:items-center lg:justify-between`}>
+          <p className="text-sm text-nidaan-ink">{statusMessage}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="nidaan-status-pill">
+              <span className={`nidaan-status-dot ${integrationCheck?.face === "offline" ? "bg-nidaan-danger" : "bg-nidaan-success"}`} />
+              face
+            </span>
+            <span className="nidaan-status-pill">
+              <span className={`nidaan-status-dot ${integrationCheck?.body === "online" || health ? "bg-nidaan-success" : "bg-nidaan-danger"}`} />
+              body
+            </span>
+            <span className="nidaan-status-pill">
+              <span className={`nidaan-status-dot ${
+                telemetryState === "online" ? "bg-nidaan-success" : telemetryState === "online_simulated" ? "bg-nidaan-warning" : "bg-nidaan-danger"
+              }`} />
+              telemetry: {telemetryLabel}
+            </span>
+            <span className="nidaan-status-pill">
+              <span className={`nidaan-status-dot ${
+                (integrationCheck?.brain ?? brainHealth?.status) === "ready"
+                  ? "bg-nidaan-success"
+                  : (integrationCheck?.brain ?? brainHealth?.status) === "warming"
+                    ? "bg-nidaan-warning"
+                    : "bg-nidaan-danger"
+              }`} />
+              brain: {integrationCheck?.brain ?? brainHealth?.status ?? "unknown"}
+            </span>
+          </div>
+        </div>
+        {integrationCheckMessage && (
+          <p className="mt-2 px-1 text-xs text-nidaan-muted">{integrationCheckMessage}</p>
+        )}
+      </div>
+
+      <main className="mx-auto grid w-full max-w-[1400px] grid-cols-1 gap-5 px-4 py-5 lg:px-6 xl:grid-cols-12">
         <section className="space-y-5 xl:col-span-4">
           <article id="incident-command" className="nidaan-card p-5">
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-              <h2 className="nidaan-display text-lg font-semibold text-nidaan-ink">Incident Command</h2>
-              <span className="nidaan-chip">Human-in-the-loop enforced</span>
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <h2 className="nidaan-display text-lg font-semibold text-nidaan-ink">1. Describe Incident</h2>
+              <span className="nidaan-chip">required</span>
             </div>
             <p className="text-sm text-nidaan-muted">
-              Pick a realistic scenario, adjust candidate search depth, and trigger the causal response engine.
+              Mention symptoms, customer impact, and what changed before the incident.
             </p>
-
             <div className="mt-4 flex flex-wrap gap-2">
               {INCIDENT_PRESETS.map((preset) => (
                 <button
@@ -887,7 +854,7 @@ export default function DashboardPage() {
                   }}
                   className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
                     selectedPreset === preset.id
-                      ? "border-nidaan-accent/30 bg-nidaan-accent/12 text-nidaan-accent-strong"
+                      ? "border-nidaan-accent/35 bg-nidaan-accent/10 text-nidaan-accent-strong"
                       : "border-nidaan-border bg-white text-nidaan-muted hover:border-nidaan-accent/30 hover:text-nidaan-accent-strong"
                   }`}
                 >
@@ -895,21 +862,17 @@ export default function DashboardPage() {
                 </button>
               ))}
             </div>
-
             <textarea
               value={incidentSummary}
               onChange={(event) => setIncidentSummary(event.target.value)}
-              rows={5}
+              rows={6}
               className="mt-4 w-full rounded-2xl border border-nidaan-border bg-white p-3 text-sm leading-relaxed text-nidaan-ink outline-none transition focus:border-nidaan-accent/45 focus:ring-2 focus:ring-nidaan-accent/15"
-              placeholder="Describe blast radius, customer impact, and first observed symptoms."
+              placeholder="Example: Login requests are retrying. Error rate jumped to 18%. DB connections are near max."
             />
-
             {expertMode && (
-              <div className="mt-4 rounded-2xl border border-nidaan-border bg-white/80 p-3">
+              <div className="mt-4 rounded-xl border border-nidaan-border bg-white/90 p-3">
                 <div className="mb-2 flex items-center justify-between">
-                  <span className="text-xs font-semibold uppercase tracking-wider text-nidaan-muted">
-                    Candidate Search Depth
-                  </span>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-nidaan-muted">Candidate Depth</p>
                   <span className="nidaan-mono text-xs text-nidaan-ink">{candidateCount}</span>
                 </div>
                 <input
@@ -918,257 +881,51 @@ export default function DashboardPage() {
                   max={8}
                   step={1}
                   value={candidateCount}
-                  onChange={(event) => {
-                    setCandidateCount(Number(event.target.value));
-                  }}
-                  className="w-full accent-[#0f766e]"
+                  onChange={(event) => setCandidateCount(Number(event.target.value))}
+                  className="w-full accent-[#0b7a75]"
                 />
                 <p className="mt-2 text-xs text-nidaan-muted">
-                  More candidates increase diversity before verifier ranking. Recommended for demos: 3-5.
+                  Use 1-3 for speed, 4-8 for diverse candidate search.
                 </p>
               </div>
             )}
           </article>
 
           <article className="nidaan-card p-5">
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="nidaan-display text-lg font-semibold text-nidaan-ink">Incident Workflow</h2>
-              <span className="nidaan-chip">guided</span>
+            <div className="mb-2 flex items-center justify-between">
+              <h2 className="nidaan-display text-lg font-semibold text-nidaan-ink">2. Health & Trust</h2>
+              <span className="nidaan-chip">live status</span>
             </div>
             <div className="space-y-2 text-sm text-nidaan-muted">
-              <p>
-                <span className="nidaan-mono text-nidaan-ink">1.</span> Describe incident blast radius and trigger analysis.
-              </p>
-              <p>
-                <span className="nidaan-mono text-nidaan-ink">2.</span> Validate root cause and graph evidence.
-              </p>
-              <p>
-                <span className="nidaan-mono text-nidaan-ink">3.</span> Authorize intervention with reason for audit.
-              </p>
-              <p>
-                <span className="nidaan-mono text-nidaan-ink">4.</span> Submit analyst feedback to improve future responses.
-              </p>
+              <p>Model: <span className="font-semibold text-nidaan-ink">{health?.model_id ?? "waiting..."}</span></p>
+              <p>Artifact: <span className="font-semibold text-nidaan-ink">{health?.artifact_label ?? "waiting..."}</span></p>
+              <p>Safety Plane: <span className="font-semibold text-nidaan-ink">{health?.safety_plane ?? "read-only-copilot"}</span></p>
+              <p>Telemetry: <span className={`font-semibold ${telemetryState === "online" ? "text-nidaan-success" : telemetryState === "online_simulated" ? "text-nidaan-warning" : "text-nidaan-danger"}`}>{telemetryLabel}</span></p>
             </div>
-          </article>
-
-          <article id="runtime-pulse" className="nidaan-card p-5">
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="nidaan-display text-lg font-semibold text-nidaan-ink">Runtime Pulse</h2>
-              <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-bold uppercase tracking-[0.08em] ${
-                statusTone === "success"
-                  ? "border-nidaan-success/30 bg-nidaan-success/10 text-nidaan-success"
-                  : statusTone === "error"
-                    ? "border-nidaan-danger/30 bg-nidaan-danger/10 text-nidaan-danger"
-                    : "border-nidaan-accent/30 bg-nidaan-accent/10 text-nidaan-accent-strong"
-              }`}>
-                <span className={`h-2 w-2 rounded-full ${statusTone === "error" ? "bg-nidaan-danger" : "bg-nidaan-success"}`} />
-                {statusTone}
-              </span>
-            </div>
-            <p className="text-sm text-nidaan-muted">{statusMessage}</p>
-
-            {health && !expertMode && (
-              <div className="mt-4 rounded-2xl border border-nidaan-border bg-white p-3">
-                <p className="text-xs text-nidaan-ink">
-                  Runtime is connected with artifact <span className="nidaan-mono">{health.artifact_label}</span>.
-                </p>
-                <p className="mt-1 text-xs text-nidaan-muted">
-                  Detailed runtime metadata is available in expert mode.
-                </p>
-                {integrationCheck?.telemetry === "online_simulated" && (
-                  <p className="mt-2 text-xs text-nidaan-warning">
-                    Telemetry source is simulated. Connect live telemetry for production-grade trust.
-                  </p>
-                )}
-              </div>
-            )}
-
-            {health && expertMode && (
-              <div className="mt-4 grid grid-cols-2 gap-3">
-                <div className="rounded-xl border border-nidaan-border bg-white p-3">
-                  <p className="nidaan-mono text-[10px] uppercase tracking-wider text-nidaan-muted">model</p>
-                  <p className="mt-1 text-xs font-semibold text-nidaan-ink">{health.model_id}</p>
-                </div>
-                <div className="rounded-xl border border-nidaan-border bg-white p-3">
-                  <p className="nidaan-mono text-[10px] uppercase tracking-wider text-nidaan-muted">artifact</p>
-                  <p className="mt-1 text-xs font-semibold text-nidaan-ink">{health.artifact_label}</p>
-                </div>
-                <div className="rounded-xl border border-nidaan-border bg-white p-3">
-                  <p className="nidaan-mono text-[10px] uppercase tracking-wider text-nidaan-muted">safety plane</p>
-                  <p className="mt-1 text-xs font-semibold text-nidaan-ink">{health.safety_plane}</p>
-                </div>
-                <div className="rounded-xl border border-nidaan-border bg-white p-3">
-                  <p className="nidaan-mono text-[10px] uppercase tracking-wider text-nidaan-muted">max tokens</p>
-                  <p className="mt-1 text-xs font-semibold text-nidaan-ink">{health.generation_max_tokens}</p>
-                </div>
-              </div>
-            )}
-
-            {brainHealth && expertMode && (
-              <div className="mt-3 rounded-2xl border border-nidaan-border bg-white p-3">
-                <div className="mb-2 flex items-center justify-between gap-2">
-                  <p className="nidaan-mono text-[10px] uppercase tracking-wider text-nidaan-muted">brain runtime</p>
-                  <span className={`rounded-full border px-2 py-0.5 nidaan-mono text-[10px] uppercase ${
-                    brainHealth.status === "ready"
-                      ? "border-nidaan-success/30 bg-nidaan-success/10 text-nidaan-success"
-                      : brainHealth.status === "warming"
-                        ? "border-nidaan-warning/30 bg-nidaan-warning/10 text-nidaan-warning"
-                        : "border-nidaan-danger/30 bg-nidaan-danger/10 text-nidaan-danger"
-                  }`}>
-                    {brainHealth.status}
-                  </span>
-                </div>
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  <p className="text-xs text-nidaan-ink"><span className="nidaan-mono text-nidaan-muted">backend:</span> {brainHealth.serving_backend}</p>
-                  <p className="text-xs text-nidaan-ink"><span className="nidaan-mono text-nidaan-muted">engine loaded:</span> {String(brainHealth.engine_loaded)}</p>
-                  <p className="break-all text-xs text-nidaan-ink"><span className="nidaan-mono text-nidaan-muted">base model:</span> {brainHealth.base_model}</p>
-                  <p className="break-all text-xs text-nidaan-ink"><span className="nidaan-mono text-nidaan-muted">adapter:</span> {brainHealth.lora_adapter}</p>
-                </div>
-                {brainHealth.engine_error && (
-                  <p className="mt-2 text-xs text-nidaan-danger">{brainHealth.engine_error}</p>
-                )}
-              </div>
-            )}
-
-            {brainHealth && !expertMode && (
-              <p className="mt-3 text-xs text-nidaan-muted">
-                Brain status: <span className="nidaan-mono text-nidaan-ink">{brainHealth.status}</span>
+            {telemetryState === "online_simulated" && (
+              <p className="mt-3 rounded-xl border border-nidaan-warning/30 bg-nidaan-warning/10 px-3 py-2 text-xs text-nidaan-warning">
+                Telemetry is simulated. Connect live telemetry before calling this production-ready.
               </p>
+            )}
+            {expertMode && (
+              <div className="mt-3 rounded-xl border border-nidaan-border bg-white p-3 text-xs text-nidaan-ink">
+                <p className="break-all"><span className="nidaan-mono text-nidaan-muted">body:</span> {BODY_BASE}</p>
+                <p className="mt-1 break-all"><span className="nidaan-mono text-nidaan-muted">brain:</span> {health ? toBrainHealthUrl(health.vllm_endpoint) : "waiting..."}</p>
+                <p className="mt-1"><span className="nidaan-mono text-nidaan-muted">services seen:</span> {telemetryServiceCount}</p>
+                <a href={`${BODY_BASE}/docs`} className="mt-2 inline-block text-nidaan-accent-strong underline">Open API Docs</a>
+              </div>
             )}
           </article>
 
-          {expertMode && (
-          <article id="system-integration" className="nidaan-card p-5">
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="nidaan-display text-lg font-semibold text-nidaan-ink">System Integration</h2>
-              <span className="nidaan-chip">Face + Body + Brain</span>
-            </div>
-            <p className="text-sm text-nidaan-muted">
-              Live wiring status across microservices, including model-serving readiness from the Brain endpoint.
-            </p>
-
-            <div className="mt-4 grid grid-cols-2 gap-3">
-              <div className="rounded-xl border border-nidaan-border bg-white p-3">
-                <p className="nidaan-mono text-[10px] uppercase tracking-wider text-nidaan-muted">face</p>
-                <p className={`mt-1 text-xs font-semibold ${
-                  integrationCheck?.face === "offline" ? "text-nidaan-danger" : "text-nidaan-success"
-                }`}>
-                  {integrationCheck?.face ?? "online"}
-                </p>
-              </div>
-              <div className="rounded-xl border border-nidaan-border bg-white p-3">
-                <p className="nidaan-mono text-[10px] uppercase tracking-wider text-nidaan-muted">body</p>
-                <p className={`mt-1 text-xs font-semibold ${
-                  integrationCheck?.body === "online" ? "text-nidaan-success" : "text-nidaan-danger"
-                }`}>
-                  {integrationCheck?.body ?? (health ? "online" : "checking")}
-                </p>
-              </div>
-              <div className="rounded-xl border border-nidaan-border bg-white p-3">
-                <p className="nidaan-mono text-[10px] uppercase tracking-wider text-nidaan-muted">telemetry api</p>
-                <p className={`mt-1 text-xs font-semibold ${
-                  integrationCheck?.telemetry === "online"
-                    ? "text-nidaan-success"
-                    : integrationCheck?.telemetry === "online_simulated"
-                      ? "text-nidaan-warning"
-                      : "text-nidaan-danger"
-                }`}>
-                  {integrationCheck?.telemetry ?? "checking"}
-                </p>
-              </div>
-              <div className="rounded-xl border border-nidaan-border bg-white p-3">
-                <p className="nidaan-mono text-[10px] uppercase tracking-wider text-nidaan-muted">brain</p>
-                <p className={`mt-1 text-xs font-semibold ${
-                  (integrationCheck?.brain ?? "unknown") === "ready"
-                    ? "text-nidaan-success"
-                    : (integrationCheck?.brain ?? "unknown") === "warming"
-                      ? "text-nidaan-warning"
-                      : "text-nidaan-danger"
-                }`}>
-                  {integrationCheck?.brain ?? (brainHealth?.status ?? "checking")}
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-3 rounded-xl border border-nidaan-border bg-white p-3">
-              <p className="nidaan-mono text-[10px] uppercase tracking-wider text-nidaan-muted">service endpoints</p>
-              <p className="mt-1 break-all text-xs text-nidaan-ink">face: browser origin</p>
-              <p className="mt-1 break-all text-xs text-nidaan-ink">body: {BODY_BASE}</p>
-              <p className="mt-1 break-all text-xs text-nidaan-ink">
-                brain: {health ? toBrainHealthUrl(health.vllm_endpoint) : "waiting for body health"}
-              </p>
-              {integrationCheck?.checked_at && (
-                <p className="mt-2 nidaan-mono text-[10px] text-nidaan-muted">
-                  last check: {shortTimestamp(integrationCheck.checked_at)}
-                </p>
-              )}
-            </div>
-
-            {integrationSnapshot && (
-              <div className="mt-3 rounded-xl border border-nidaan-border bg-white p-3">
-                <div className="mb-2 flex items-center justify-between gap-2">
-                  <p className="nidaan-mono text-[10px] uppercase tracking-wider text-nidaan-muted">diagnostics snapshot</p>
-                  <span className={`rounded-full border px-2 py-0.5 nidaan-mono text-[10px] uppercase ${
-                    integrationSnapshot.status === "ok"
-                      ? "border-nidaan-success/30 bg-nidaan-success/10 text-nidaan-success"
-                      : "border-nidaan-warning/30 bg-nidaan-warning/10 text-nidaan-warning"
-                  }`}>
-                    {integrationSnapshot.status}
-                  </span>
-                </div>
-                <p className="text-xs text-nidaan-ink">
-                  <span className="nidaan-mono text-nidaan-muted">checked:</span> {shortTimestamp(integrationSnapshot.checked_at)}
-                </p>
-                <p className="mt-1 break-all text-xs text-nidaan-ink">
-                  <span className="nidaan-mono text-nidaan-muted">body health:</span> {integrationSnapshot.endpoints.body_health}
-                </p>
-                <p className="mt-1 break-all text-xs text-nidaan-ink">
-                  <span className="nidaan-mono text-nidaan-muted">telemetry api:</span> {integrationSnapshot.endpoints.telemetry_api}
-                </p>
-                <p className="mt-1 break-all text-xs text-nidaan-ink">
-                  <span className="nidaan-mono text-nidaan-muted">brain health:</span> {integrationSnapshot.endpoints.brain_health}
-                </p>
-                {integrationSnapshot.notes.length > 0 && (
-                  <p className="mt-2 text-xs text-nidaan-muted">{integrationSnapshot.notes.join(" · ")}</p>
-                )}
-              </div>
-            )}
-          </article>
-          )}
-
-          {expertMode && (
           <article className="nidaan-card p-5">
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="nidaan-display text-lg font-semibold text-nidaan-ink">Telemetry Snapshot</h2>
-              <span className="nidaan-mono text-[10px] uppercase tracking-[0.1em] text-nidaan-muted">current source snapshot</span>
-            </div>
-            <div className="space-y-3">
-              {Object.entries(telemetryView).map(([service, metrics]) => {
-                const tone = serviceTone(service);
-                return (
-                  <div key={service} className={`rounded-2xl border bg-white/90 p-4 ${tone.border}`}>
-                    <div className="mb-3 flex items-center justify-between gap-2">
-                      <h3 className={`text-sm font-semibold ${tone.title}`}>{prettifyLabel(service)}</h3>
-                      <span className={`rounded-full border px-2 py-0.5 nidaan-mono text-[10px] uppercase ${tone.badgeClass}`}>
-                        {tone.badge}
-                      </span>
-                    </div>
-                    <div className="space-y-1.5">
-                      {Object.entries(metrics).map(([key, value]) => (
-                        <div key={key} className="flex items-center justify-between gap-4">
-                          <span className="nidaan-mono text-[11px] text-nidaan-muted">{key.replace(/_/g, " ")}</span>
-                          <span className={`nidaan-mono text-xs font-semibold ${metricLooksCritical(value) ? "text-nidaan-danger" : "text-nidaan-ink"}`}>
-                            {String(value)}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
+            <h2 className="nidaan-display text-lg font-semibold text-nidaan-ink">3. Guided Flow</h2>
+            <div className="mt-3 space-y-2 text-sm text-nidaan-muted">
+              <p><span className="nidaan-mono text-nidaan-ink">A.</span> Click <strong>Analyze Incident</strong>.</p>
+              <p><span className="nidaan-mono text-nidaan-ink">B.</span> Check root cause + graph + evidence.</p>
+              <p><span className="nidaan-mono text-nidaan-ink">C.</span> Authorize only if safe.</p>
+              <p><span className="nidaan-mono text-nidaan-ink">D.</span> Submit feedback for model improvement.</p>
             </div>
           </article>
-          )}
         </section>
 
         <section className="space-y-5 xl:col-span-8">
@@ -1186,13 +943,10 @@ export default function DashboardPage() {
                       ? "border-nidaan-success/30 bg-nidaan-success/10 text-nidaan-success"
                       : "border-nidaan-warning/30 bg-nidaan-warning/10 text-nidaan-warning"
                   }`}>
-                    verifier {graphResult.verifier.accepted ? "accepted" : "fallback"}
+                    {graphResult.generation_metadata.source}
                   </span>
                   <span className="rounded-full border border-nidaan-border bg-white px-2 py-1 nidaan-mono text-nidaan-muted">
                     {graphResult.analysis.dag_nodes.length} nodes · {graphResult.analysis.dag_edges.length} edges
-                  </span>
-                  <span className="rounded-full border border-nidaan-border bg-white px-2 py-1 nidaan-mono text-nidaan-muted">
-                    {shortTimestamp(graphResult.timestamp)}
                   </span>
                 </div>
               ) : (
@@ -1205,11 +959,9 @@ export default function DashboardPage() {
               {loading && !graphResult ? (
                 <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
                   <div className="h-10 w-10 rounded-full border-4 border-nidaan-accent/25 border-t-nidaan-accent animate-spin" />
-                  <p className="text-sm font-semibold text-nidaan-ink">
-                    {analysisStage || "Running causal analysis..."}
-                  </p>
+                  <p className="text-sm font-semibold text-nidaan-ink">{analysisStage || "Running grounded analysis..."}</p>
                   <p className="max-w-md text-xs text-nidaan-muted">
-                    First response may take up to 40 seconds during model warm-up. Use <span className="nidaan-mono">Stop</span> to cancel the in-flight request.
+                    First response may take up to 40 seconds during warm-up.
                   </p>
                 </div>
               ) : graphResult ? (
@@ -1226,35 +978,55 @@ export default function DashboardPage() {
                   )}
                 </div>
               ) : analysisError ? (
-                <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
+                <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
                   <p className="text-sm font-semibold text-nidaan-danger">{analysisError}</p>
                   <p className="max-w-md text-xs text-nidaan-muted">
-                    Synthetic fallback rendering is disabled in product mode. Retry once runtime is healthy.
+                    Runtime looks unhealthy. Refresh runtime and run integration check once before retrying.
                   </p>
                 </div>
               ) : (
                 <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
                   <div className="nidaan-display text-5xl text-nidaan-accent/30">DAG</div>
                   <p className="max-w-md text-sm text-nidaan-muted">
-                    Trigger analysis to render the directed acyclic graph, then inspect root cause and intervention path.
+                    Analysis output will appear here with root cause and intervention path.
                   </p>
                 </div>
               )}
             </div>
           </article>
 
+          {!result && (
+            <article className="nidaan-card p-5">
+              <h3 className="nidaan-display text-lg font-semibold text-nidaan-ink">What You’ll Get</h3>
+              <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
+                <div className="rounded-xl border border-nidaan-border bg-white p-3 text-sm text-nidaan-muted">
+                  <p className="font-semibold text-nidaan-ink">Root Cause</p>
+                  <p className="mt-1">Structural explanation, not just symptoms.</p>
+                </div>
+                <div className="rounded-xl border border-nidaan-border bg-white p-3 text-sm text-nidaan-muted">
+                  <p className="font-semibold text-nidaan-ink">Intervention</p>
+                  <p className="mt-1">Safe remediation path with human approval gate.</p>
+                </div>
+                <div className="rounded-xl border border-nidaan-border bg-white p-3 text-sm text-nidaan-muted">
+                  <p className="font-semibold text-nidaan-ink">Evidence</p>
+                  <p className="mt-1">Grounding notes and verifier signals.</p>
+                </div>
+              </div>
+            </article>
+          )}
+
           {result && (
-            <article className="grid grid-cols-1 gap-5 lg:grid-cols-3">
-              <div className="nidaan-card p-5">
-                <p className="mb-2 nidaan-mono text-[10px] uppercase tracking-[0.1em] text-nidaan-muted">root cause</p>
+            <article className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+              <div className="nidaan-card p-4">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-nidaan-muted">Root Cause</p>
                 <p className="text-sm leading-relaxed text-nidaan-ink">{result.analysis.root_cause}</p>
               </div>
-              <div className="nidaan-card p-5">
-                <p className="mb-2 nidaan-mono text-[10px] uppercase tracking-[0.1em] text-nidaan-muted">intervention simulation</p>
+              <div className="nidaan-card p-4">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-nidaan-muted">Intervention Logic</p>
                 <p className="text-sm leading-relaxed text-nidaan-ink">{result.analysis.intervention_simulation}</p>
               </div>
-              <div className="nidaan-card p-5">
-                <p className="mb-2 nidaan-mono text-[10px] uppercase tracking-[0.1em] text-nidaan-muted">recommended action</p>
+              <div className="nidaan-card p-4">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-nidaan-muted">Recommended Action</p>
                 <p className="text-sm leading-relaxed text-nidaan-ink">{result.analysis.recommended_action}</p>
               </div>
             </article>
@@ -1262,108 +1034,19 @@ export default function DashboardPage() {
 
           {result && (
             <article className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-              <div className="nidaan-card p-5">
-                <div className="mb-3 flex items-center justify-between">
-                  <h3 className="nidaan-display text-lg font-semibold text-nidaan-ink">Grounding Evidence</h3>
-                  <span className="nidaan-chip">{result.grounding_evidence.length} docs</span>
+              <div className={`nidaan-card border-2 p-5 transition ${
+                authorized ? "border-nidaan-success/45" : "border-nidaan-danger/40"
+              }`}>
+                <div className="mb-4 flex items-center justify-between gap-2">
+                  <h3 className="nidaan-display text-lg font-semibold text-nidaan-ink">4. Safety Approval</h3>
+                  <span className={`rounded-full border px-2 py-1 nidaan-mono text-[10px] uppercase ${
+                    authorized
+                      ? "border-nidaan-success/30 bg-nidaan-success/10 text-nidaan-success"
+                      : "border-nidaan-danger/30 bg-nidaan-danger/10 text-nidaan-danger"
+                  }`}>
+                    {authorized ? "authorized" : "pending"}
+                  </span>
                 </div>
-                <div className="space-y-3">
-                  {result.grounding_evidence.map((evidence) => (
-                    <div key={evidence.id} className="rounded-2xl border border-nidaan-border bg-white p-3">
-                      <div className="mb-1 flex items-center justify-between gap-3">
-                        <span className="text-sm font-semibold text-nidaan-ink">{evidence.title}</span>
-                        <span className="nidaan-mono rounded-full border border-nidaan-border px-2 py-0.5 text-[10px] uppercase text-nidaan-muted">
-                          {evidence.kind}
-                        </span>
-                      </div>
-                      <p className="text-xs leading-relaxed text-nidaan-muted">{evidence.summary}</p>
-                      {evidence.matched_terms.length > 0 && (
-                        <p className="mt-2 nidaan-mono text-[10px] text-nidaan-accent-strong">
-                          matched: {evidence.matched_terms.join(", ")}
-                        </p>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="space-y-5">
-                <div className="nidaan-card p-5">
-                  <h3 className="nidaan-display mb-3 text-lg font-semibold text-nidaan-ink">Generation Verifier</h3>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="rounded-xl border border-nidaan-border bg-white p-3">
-                      <p className="nidaan-mono text-[10px] uppercase tracking-wider text-nidaan-muted">score</p>
-                      <p className="mt-1 text-xl font-bold text-nidaan-ink">{result.verifier.score.toFixed(3)}</p>
-                    </div>
-                    <div className="rounded-xl border border-nidaan-border bg-white p-3">
-                      <p className="nidaan-mono text-[10px] uppercase tracking-wider text-nidaan-muted">source</p>
-                      <p className="mt-1 text-sm font-semibold text-nidaan-ink">{result.generation_metadata.source}</p>
-                    </div>
-                    <div className="rounded-xl border border-nidaan-border bg-white p-3">
-                      <p className="nidaan-mono text-[10px] uppercase tracking-wider text-nidaan-muted">evidence overlap</p>
-                      <p className="mt-1 text-sm font-semibold text-nidaan-ink">{result.verifier.evidence_overlap}</p>
-                    </div>
-                    <div className="rounded-xl border border-nidaan-border bg-white p-3">
-                      <p className="nidaan-mono text-[10px] uppercase tracking-wider text-nidaan-muted">telemetry overlap</p>
-                      <p className="mt-1 text-sm font-semibold text-nidaan-ink">{result.verifier.telemetry_overlap}</p>
-                    </div>
-                  </div>
-                  <div className="mt-3 rounded-xl border border-nidaan-border bg-white p-3">
-                    <p className="nidaan-mono text-[10px] uppercase tracking-wider text-nidaan-muted">candidate selection</p>
-                    <p className="mt-1 text-xs text-nidaan-ink">
-                      {result.generation_metadata.selected_candidate_index >= 0
-                        ? `${result.generation_metadata.selected_candidate_index + 1} / ${result.generation_metadata.candidate_count}`
-                        : `fallback / ${result.generation_metadata.candidate_count}`}
-                    </p>
-                    <p className="mt-2 text-xs text-nidaan-muted">
-                      {result.verifier.reasons.join(" · ")}
-                    </p>
-                  </div>
-                </div>
-
-                {expertMode && refutation && (
-                  <div className="nidaan-card p-5">
-                    <h3 className="nidaan-display mb-3 text-lg font-semibold text-nidaan-ink">Refutation Monitor</h3>
-                    <div className="grid grid-cols-2 gap-3 text-sm">
-                      <div className="rounded-xl border border-nidaan-border bg-white p-3">
-                        <p className="nidaan-mono text-[10px] uppercase tracking-wider text-nidaan-muted">test type</p>
-                        <p className="mt-1 text-xs font-semibold text-nidaan-ink">{String(refutation.test_type || "-")}</p>
-                      </div>
-                      <div className="rounded-xl border border-nidaan-border bg-white p-3">
-                        <p className="nidaan-mono text-[10px] uppercase tracking-wider text-nidaan-muted">verdict</p>
-                        <p className={`mt-1 text-xs font-semibold ${refutation.is_robust ? "text-nidaan-success" : "text-nidaan-warning"}`}>
-                          {refutation.is_robust ? "PASS" : "WARN"}
-                        </p>
-                      </div>
-                    </div>
-                    <p className="mt-3 text-xs text-nidaan-muted">
-                      Confounder injected: {String(refutation.injected_confounder || "-")}
-                    </p>
-                  </div>
-                )}
-              </div>
-            </article>
-          )}
-
-          {result && (
-            <article className={`nidaan-card border-2 p-5 transition ${
-              authorized ? "border-nidaan-success/45" : "border-nidaan-danger/40"
-            }`}>
-              <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-                <h3 className="nidaan-display text-lg font-semibold text-nidaan-ink">Intervention Engine</h3>
-                <span className={`rounded-full border px-2 py-1 nidaan-mono text-[10px] uppercase ${
-                  authorized
-                    ? "border-nidaan-success/30 bg-nidaan-success/10 text-nidaan-success"
-                    : "border-nidaan-danger/30 bg-nidaan-danger/10 text-nidaan-danger"
-                }`}>
-                  {authorized ? "authorized" : "awaiting human approval"}
-                </span>
-              </div>
-              <div className="rounded-2xl border border-nidaan-border bg-white p-4">
-                <p className="nidaan-mono text-[10px] uppercase tracking-[0.1em] text-nidaan-muted">recommended action</p>
-                <p className="mt-2 text-sm leading-relaxed text-nidaan-ink">{result.analysis.recommended_action}</p>
-              </div>
-              <div className="mt-4">
                 {!authorized ? (
                   <div className="space-y-3">
                     <textarea
@@ -1371,51 +1054,75 @@ export default function DashboardPage() {
                       onChange={(event) => setAuthorizationReason(event.target.value)}
                       rows={2}
                       className="w-full rounded-2xl border border-nidaan-border bg-white p-3 text-sm text-nidaan-ink outline-none transition focus:border-nidaan-accent/45 focus:ring-2 focus:ring-nidaan-accent/15"
-                      placeholder="Approval reason (required for audit log)"
+                      placeholder="Why is this safe to approve?"
                     />
                     <button
                       id="authorize-intervention-btn"
-                      onClick={() => {
-                        void authorizeIntervention();
-                      }}
+                      onClick={() => void authorizeIntervention()}
                       disabled={authorizationSubmitting}
                       className="w-full rounded-xl bg-gradient-to-r from-nidaan-danger to-[#e1664b] px-5 py-3 text-sm font-bold text-white shadow-lg shadow-nidaan-danger/30 transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                      {authorizationSubmitting ? "Authorizing..." : "Human-in-the-loop: Authorize Intervention"}
+                      {authorizationSubmitting ? "Authorizing..." : "Authorize Intervention"}
                     </button>
-                    {authorizationStatus && (
-                      <p className="text-xs text-nidaan-ink">{authorizationStatus}</p>
-                    )}
+                    {authorizationStatus && <p className="text-xs text-nidaan-ink">{authorizationStatus}</p>}
+                    <p className="text-xs text-nidaan-muted">
+                      Safety plane <span className="nidaan-mono text-nidaan-ink">{result.safety_plane}</span> requires explicit human approval.
+                    </p>
                   </div>
                 ) : (
-                  <div className="w-full rounded-xl border border-nidaan-success/30 bg-nidaan-success/15 px-5 py-3 text-center text-sm font-semibold text-nidaan-success">
-                    Intervention Authorized. Execution can proceed through operator controls.
+                  <div className="rounded-xl border border-nidaan-success/30 bg-nidaan-success/10 p-3 text-sm font-semibold text-nidaan-success">
+                    Intervention authorized. You can proceed with operator runbooks.
                   </div>
                 )}
               </div>
-              {result.requires_human_approval && !authorized && (
-                <p className="mt-3 text-center text-xs text-nidaan-muted">
-                  Safety Plane <span className="nidaan-mono text-nidaan-ink">{result.safety_plane}</span> blocks action until explicit human authorization.
-                </p>
-              )}
+
+              <div className="nidaan-card p-5">
+                <div className="mb-3 flex items-center justify-between">
+                  <h3 className="nidaan-display text-lg font-semibold text-nidaan-ink">Evidence & Verifier</h3>
+                  <span className="nidaan-chip">{result.grounding_evidence.length} sources</span>
+                </div>
+                <div className="mb-4 grid grid-cols-2 gap-2">
+                  <div className="rounded-xl border border-nidaan-border bg-white p-2.5 text-xs">
+                    <p className="nidaan-mono text-nidaan-muted">score</p>
+                    <p className="font-semibold text-nidaan-ink">{result.verifier.score.toFixed(3)}</p>
+                  </div>
+                  <div className="rounded-xl border border-nidaan-border bg-white p-2.5 text-xs">
+                    <p className="nidaan-mono text-nidaan-muted">source</p>
+                    <p className="font-semibold text-nidaan-ink">{result.generation_metadata.source}</p>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  {result.grounding_evidence.slice(0, 3).map((evidence) => (
+                    <div key={evidence.id} className="rounded-xl border border-nidaan-border bg-white p-3">
+                      <p className="text-sm font-semibold text-nidaan-ink">{evidence.title}</p>
+                      <p className="mt-1 text-xs text-nidaan-muted">{evidence.summary}</p>
+                    </div>
+                  ))}
+                </div>
+                {expertMode && refutation && (
+                  <p className="mt-3 text-xs text-nidaan-muted">
+                    Refutation: {String(refutation.verdict || "pending")}
+                  </p>
+                )}
+              </div>
             </article>
           )}
 
           {result && (
             <article id="analyst-feedback-loop" className="nidaan-card p-5">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <h3 className="nidaan-display text-lg font-semibold text-nidaan-ink">Analyst Feedback Loop</h3>
+                <h3 className="nidaan-display text-lg font-semibold text-nidaan-ink">5. Analyst Feedback</h3>
                 <span className="nidaan-mono text-[10px] uppercase tracking-wider text-nidaan-muted">{result.analysis_id}</span>
               </div>
               <p className="mb-3 text-sm text-nidaan-muted">
-                Capture real analyst judgment now. These labels are the fastest path to improving production outputs.
+                Mark whether this response was useful, and add corrections if needed.
               </p>
               <textarea
                 value={feedbackNote}
                 onChange={(event) => setFeedbackNote(event.target.value)}
                 rows={3}
                 className="w-full rounded-2xl border border-nidaan-border bg-white p-3 text-sm text-nidaan-ink outline-none transition focus:border-nidaan-accent/45 focus:ring-2 focus:ring-nidaan-accent/15"
-                placeholder="Optional correction or missing operational context..."
+                placeholder="Optional correction or missing context..."
               />
               <div className="mt-4 flex flex-wrap gap-3">
                 <button
@@ -1436,13 +1143,12 @@ export default function DashboardPage() {
               {feedbackStatus && <p className="mt-3 text-sm text-nidaan-ink">{feedbackStatus}</p>}
             </article>
           )}
-
         </section>
       </main>
 
-      <footer className="border-t border-nidaan-border/80 bg-white/70 px-5 py-4 lg:px-8">
-        <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-1 text-xs text-nidaan-muted md:flex-row md:items-center md:justify-between">
-          <span>SRE-Nidaan · Stable SFT baseline + grounding + verifier</span>
+      <footer className="border-t border-nidaan-border/80 bg-white/80 px-4 py-4 lg:px-6">
+        <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-1 text-xs text-nidaan-muted md:flex-row md:items-center md:justify-between">
+          <span>SRE-Nidaan · Causal incident assistant with human approval gates</span>
           <span className="nidaan-mono">Safety Plane: read-only-copilot · requires_human_approval=true</span>
         </div>
       </footer>

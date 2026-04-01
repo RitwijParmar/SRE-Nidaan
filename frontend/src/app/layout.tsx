@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "SRE-Nidaan | NEXUS-CAUSAL v3.1 — Causal AI Incident Response",
+  title: "SRE-Nidaan | Incident Response Copilot (एसआरई निदान)",
   description:
-    "Enterprise AI SRE dashboard using Pearl's causal hierarchy to prevent panic scaling in cloud-native environments. Powered by NEXUS-CAUSAL v3.1.",
+    "SRE-Nidaan helps teams describe incidents, run grounded causal analysis, approve interventions safely, and capture analyst feedback in one clear workflow.",
 };
 
 export default function RootLayout({
