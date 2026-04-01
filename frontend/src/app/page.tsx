@@ -144,6 +144,10 @@ const INCIDENT_PRESETS = [
   },
 ];
 
+const NETWORK_TIMEOUT_MS = 12000;
+const REFUTATION_TIMEOUT_MS = 5000;
+const ANALYZE_TIMEOUT_MS = 45000;
+
 function prettifyLabel(value: string): string {
   return value.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
 }
@@ -243,6 +247,78 @@ function toBrainHealthUrl(vllmEndpoint: string): string {
   return vllmEndpoint.replace(/\/v1\/?$/, "/health");
 }
 
+async function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init: RequestInit = {},
+  timeoutMs = NETWORK_TIMEOUT_MS
+): Promise<Response> {
+  const timeoutController = new AbortController();
+  const timeoutHandle = window.setTimeout(() => {
+    timeoutController.abort("timeout");
+  }, timeoutMs);
+
+  let detachExternalAbort: (() => void) | undefined;
+  if (init.signal) {
+    const externalSignal = init.signal;
+    if (externalSignal.aborted) {
+      timeoutController.abort("upstream-abort");
+    } else {
+      const forwardAbort = () => {
+        timeoutController.abort("upstream-abort");
+      };
+      externalSignal.addEventListener("abort", forwardAbort, { once: true });
+      detachExternalAbort = () => {
+        externalSignal.removeEventListener("abort", forwardAbort);
+      };
+    }
+  }
+
+  try {
+    return await fetch(input, { ...init, signal: timeoutController.signal });
+  } finally {
+    window.clearTimeout(timeoutHandle);
+    if (detachExternalAbort) {
+      detachExternalAbort();
+    }
+  }
+}
+
+function ensureRenderableIncidentResult(payload: IncidentResult): IncidentResult {
+  const nodes = payload.analysis.dag_nodes ?? [];
+  const edges = payload.analysis.dag_edges ?? [];
+  const nodeIds = new Set(nodes.map((node) => node.id));
+  const graphLooksRenderable =
+    nodes.length > 0 &&
+    edges.length > 0 &&
+    edges.every((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target));
+
+  if (graphLooksRenderable) {
+    return payload;
+  }
+
+  const fallbackNodes: DAGNode[] = [
+    { id: "incident", label: "Incident Symptoms" },
+    { id: "root", label: "Structural Root Cause" },
+    { id: "intervention", label: "Intervention Risk" },
+    { id: "action", label: "Recommended Action" },
+  ];
+
+  const fallbackEdges: DAGEdge[] = [
+    { id: "auto-e1", source: "incident", target: "root", animated: true },
+    { id: "auto-e2", source: "root", target: "intervention", animated: true },
+    { id: "auto-e3", source: "intervention", target: "action", animated: true },
+  ];
+
+  return {
+    ...payload,
+    analysis: {
+      ...payload.analysis,
+      dag_nodes: fallbackNodes,
+      dag_edges: fallbackEdges,
+    },
+  };
+}
+
 function buildLocalFallbackResult(
   incidentSummary: string,
   telemetrySnapshot: Record<string, Record<string, string | number>>
@@ -308,9 +384,8 @@ function buildLocalFallbackResult(
 }
 
 export default function DashboardPage() {
-  const configuredBodyBase = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/$/, "");
-  const BODY_BASE = configuredBodyBase || "/body";
-  const API_BASE = configuredBodyBase ? `${configuredBodyBase}/api` : "/api";
+  const BODY_BASE = "/body";
+  const API_BASE = "/api";
   const [result, setResult] = useState<IncidentResult | null>(null);
   const [health, setHealth] = useState<HealthPayload | null>(null);
   const [brainHealth, setBrainHealth] = useState<BrainHealthPayload | null>(null);
@@ -333,20 +408,26 @@ export default function DashboardPage() {
   const [checkingIntegration, setCheckingIntegration] = useState(false);
   const [integrationCheckMessage, setIntegrationCheckMessage] = useState<string | null>(null);
   const analysisAbortRef = useRef<AbortController | null>(null);
+  const analysisRunRef = useRef(0);
 
   const serviceLinks = useMemo(
     () => [
-      { label: "Body Health", href: `${BODY_BASE}/health`, hint: "Runtime health and model metadata" },
+      { label: "Runtime Pulse Panel", href: "#runtime-pulse", hint: "Live runtime health rendered inside this UI" },
+      { label: "Integration Panel", href: "#system-integration", hint: "Face-body-brain status rendered in dashboard cards" },
+      { label: "Causal Graph Workspace", href: "#causal-graph-workspace", hint: "Main DAG canvas and analysis timeline" },
+      { label: "Analyst Feedback Loop", href: "#analyst-feedback-loop", hint: "Submit useful/correction labels for tuning" },
       { label: "Body API Docs", href: `${BODY_BASE}/docs`, hint: "Try requests live with OpenAPI UI" },
       { label: "Analyze Endpoint", href: `${BODY_BASE}/docs#/default/analyze_incident_api_analyze_incident_post`, hint: "Primary inference entrypoint" },
-      { label: "Telemetry Feed", href: `${API_BASE}/telemetry`, hint: "Current incident telemetry payload" },
-      { label: "Integration Diagnostics", href: `${API_BASE}/integration-check`, hint: "Unified face-body-brain integration status" },
       { label: "Feedback Sink", href: `${BODY_BASE}/docs#/default/analysis_feedback_api_analysis_feedback_post`, hint: "Analyst rating submission endpoint" },
     ],
-    [API_BASE, BODY_BASE]
+    [BODY_BASE]
   );
 
   const telemetryView = result?.telemetry_snapshot ?? telemetry ?? STATIC_TELEMETRY;
+  const graphResult = useMemo(
+    () => (result ? ensureRenderableIncidentResult(result) : null),
+    [result]
+  );
 
   const refreshRuntime = useCallback(async (): Promise<HealthPayload> => {
     setRefreshingRuntime(true);
@@ -354,8 +435,8 @@ export default function DashboardPage() {
     setStatusMessage("Refreshing runtime status...");
     try {
       const [healthRes, telemetryRes] = await Promise.all([
-        fetch(`${BODY_BASE}/health`),
-        fetch(`${API_BASE}/telemetry`),
+        fetchWithTimeout(`${BODY_BASE}/health`, {}, NETWORK_TIMEOUT_MS),
+        fetchWithTimeout(`${API_BASE}/telemetry`, {}, NETWORK_TIMEOUT_MS),
       ]);
 
       if (!healthRes.ok) {
@@ -369,7 +450,11 @@ export default function DashboardPage() {
 
       let brainPayload: BrainHealthPayload | null = null;
       try {
-        const brainHealthResponse = await fetch(toBrainHealthUrl(healthPayload.vllm_endpoint));
+        const brainHealthResponse = await fetchWithTimeout(
+          toBrainHealthUrl(healthPayload.vllm_endpoint),
+          {},
+          NETWORK_TIMEOUT_MS
+        );
         if (brainHealthResponse.ok) {
           brainPayload = (await brainHealthResponse.json()) as BrainHealthPayload;
         }
@@ -386,7 +471,7 @@ export default function DashboardPage() {
       return healthPayload;
     } catch (error) {
       setStatusTone("error");
-      setStatusMessage("Runtime refresh failed. Verify backend/brain health.");
+      setStatusMessage("Runtime refresh failed or timed out. Verify backend/brain health.");
       throw error;
     } finally {
       setRefreshingRuntime(false);
@@ -401,8 +486,8 @@ export default function DashboardPage() {
       try {
         const sourceHealth = seedHealth ?? health ?? (await refreshRuntime());
         const [integrationRes, telemetryRes] = await Promise.all([
-          fetch(`${API_BASE}/integration-check`),
-          fetch(`${API_BASE}/telemetry`),
+          fetchWithTimeout(`${API_BASE}/integration-check`, {}, NETWORK_TIMEOUT_MS),
+          fetchWithTimeout(`${API_BASE}/telemetry`, {}, NETWORK_TIMEOUT_MS),
         ]);
 
         if (telemetryRes.ok) {
@@ -411,7 +496,11 @@ export default function DashboardPage() {
 
         let brainPayload: BrainHealthPayload | null = null;
         try {
-          const brainRes = await fetch(toBrainHealthUrl(sourceHealth.vllm_endpoint));
+          const brainRes = await fetchWithTimeout(
+            toBrainHealthUrl(sourceHealth.vllm_endpoint),
+            {},
+            NETWORK_TIMEOUT_MS
+          );
           if (brainRes.ok) {
             brainPayload = (await brainRes.json()) as BrainHealthPayload;
             setBrainHealth(brainPayload);
@@ -467,7 +556,7 @@ export default function DashboardPage() {
           checked_at: checkedAt,
         });
         setIntegrationCheckMessage(
-          `Checked ${shortTimestamp(checkedAt)} · integration check failed (body/telemetry unreachable).`
+          `Checked ${shortTimestamp(checkedAt)} · integration check failed or timed out (body/telemetry unreachable).`
         );
       } finally {
         setCheckingIntegration(false);
@@ -507,7 +596,11 @@ export default function DashboardPage() {
         window.setTimeout(resolve, 1200);
       });
       try {
-        const response = await fetch(`${API_BASE}/refutation-result`);
+        const response = await fetchWithTimeout(
+          `${API_BASE}/refutation-result`,
+          {},
+          REFUTATION_TIMEOUT_MS
+        );
         if (!response.ok) {
           continue;
         }
@@ -526,11 +619,13 @@ export default function DashboardPage() {
     if (loading) {
       return;
     }
+    const runId = analysisRunRef.current + 1;
+    analysisRunRef.current = runId;
     const abortController = new AbortController();
     analysisAbortRef.current = abortController;
     const timeoutHandle = window.setTimeout(() => {
       abortController.abort("timeout");
-    }, 45000);
+    }, ANALYZE_TIMEOUT_MS);
 
     setLoading(true);
     setAnalysisStage("Collecting telemetry and prompting the causal model...");
@@ -541,7 +636,7 @@ export default function DashboardPage() {
     setStatusMessage("Running grounded causal analysis...");
 
     try {
-      const response = await fetch(`${API_BASE}/analyze-incident`, {
+      const response = await fetchWithTimeout(`${API_BASE}/analyze-incident`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         signal: abortController.signal,
@@ -549,13 +644,17 @@ export default function DashboardPage() {
           incident_summary: incidentSummary,
           candidate_count: candidateCount,
         }),
-      });
+      }, ANALYZE_TIMEOUT_MS + 1500);
 
       if (!response.ok) {
         throw new Error(`analysis failed (${response.status})`);
       }
 
-      const payload: IncidentResult = await response.json();
+      if (analysisRunRef.current !== runId) {
+        return;
+      }
+
+      const payload = ensureRenderableIncidentResult((await response.json()) as IncidentResult);
       setAnalysisStage("Rendering causal graph...");
       setResult(payload);
       setTelemetry(payload.telemetry_snapshot);
@@ -568,32 +667,45 @@ export default function DashboardPage() {
       void pollRefutation();
     } catch (err) {
       console.error(err);
+      if (analysisRunRef.current !== runId) {
+        return;
+      }
       const aborted = abortController.signal.aborted;
-      const fallback = buildLocalFallbackResult(
+      const stopReason = String(abortController.signal.reason || "");
+      const fallback = ensureRenderableIncidentResult(buildLocalFallbackResult(
         incidentSummary,
         telemetry ?? STATIC_TELEMETRY
-      );
+      ));
       setResult(fallback);
       setTelemetry(fallback.telemetry_snapshot);
       if (aborted) {
         setStatusTone("error");
-        setStatusMessage("Analysis stopped or timed out. Showing deterministic fallback analysis.");
+        setStatusMessage(
+          stopReason === "timeout"
+            ? "Analysis timed out. Showing deterministic fallback analysis."
+            : "Analysis stopped. Showing deterministic fallback analysis."
+        );
       } else {
         setStatusTone("error");
         setStatusMessage("Live inference failed. Showing deterministic fallback analysis.");
       }
     } finally {
       window.clearTimeout(timeoutHandle);
-      if (analysisAbortRef.current === abortController) {
+      if (analysisAbortRef.current === abortController && analysisRunRef.current === runId) {
         analysisAbortRef.current = null;
       }
-      setLoading(false);
-      setAnalysisStage(null);
+      if (analysisRunRef.current === runId) {
+        setLoading(false);
+        setAnalysisStage(null);
+      }
     }
   }, [API_BASE, candidateCount, incidentSummary, loading, pollRefutation, telemetry]);
 
   const stopAnalysis = useCallback(() => {
     if (analysisAbortRef.current) {
+      setStatusTone("info");
+      setStatusMessage("Stopping analysis and preparing safe fallback...");
+      setAnalysisStage("Stopping analysis and loading fallback...");
       analysisAbortRef.current.abort("manual-stop");
     }
   }, []);
@@ -606,7 +718,7 @@ export default function DashboardPage() {
       setFeedbackSubmitting(true);
       setFeedbackStatus(null);
       try {
-        const response = await fetch(`${API_BASE}/analysis-feedback`, {
+        const response = await fetchWithTimeout(`${API_BASE}/analysis-feedback`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -618,7 +730,7 @@ export default function DashboardPage() {
             verifier: result.verifier,
             generation_metadata: result.generation_metadata,
           }),
-        });
+        }, NETWORK_TIMEOUT_MS);
 
         if (!response.ok) {
           throw new Error(`feedback failed (${response.status})`);
@@ -697,7 +809,7 @@ export default function DashboardPage() {
               disabled={refreshingRuntime || checkingIntegration}
               className="rounded-full border border-nidaan-border bg-white px-4 py-2 text-sm font-medium text-nidaan-ink transition hover:border-nidaan-accent/40 hover:text-nidaan-accent disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {refreshingRuntime ? "Refreshing..." : "Refresh Runtime"}
+              {refreshingRuntime || checkingIntegration ? "Refreshing..." : "Refresh Runtime"}
             </button>
             <a
               href={`${BODY_BASE}/docs`}
@@ -725,7 +837,7 @@ export default function DashboardPage() {
 
       <main className="mx-auto grid w-full max-w-[1600px] grid-cols-1 gap-6 px-5 py-6 lg:px-8 xl:grid-cols-12">
         <section className="space-y-5 xl:col-span-4">
-          <article className="nidaan-card p-5">
+          <article id="runtime-pulse" className="nidaan-card p-5">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
               <h2 className="nidaan-display text-lg font-semibold text-nidaan-ink">Incident Command</h2>
               <span className="nidaan-chip">Human-in-the-loop enforced</span>
@@ -785,7 +897,7 @@ export default function DashboardPage() {
             </div>
           </article>
 
-          <article className="nidaan-card p-5">
+          <article id="system-integration" className="nidaan-card p-5">
             <div className="mb-3 flex items-center justify-between">
               <h2 className="nidaan-display text-lg font-semibold text-nidaan-ink">Runtime Pulse</h2>
               <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-bold uppercase tracking-[0.08em] ${
@@ -976,27 +1088,27 @@ export default function DashboardPage() {
         </section>
 
         <section className="space-y-5 xl:col-span-8">
-          <article className="nidaan-card overflow-hidden">
+          <article id="causal-graph-workspace" className="nidaan-card overflow-hidden">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-nidaan-border/80 bg-white/80 px-5 py-3">
               <h2 className="nidaan-display text-lg font-semibold text-nidaan-ink">Causal Graph Workspace</h2>
               {loading ? (
                 <span className="rounded-full border border-nidaan-warning/30 bg-nidaan-warning/10 px-2 py-1 nidaan-mono text-[11px] text-nidaan-warning">
                   running analysis...
                 </span>
-              ) : result ? (
+              ) : graphResult ? (
                 <div className="flex flex-wrap items-center gap-2 text-[11px]">
                   <span className={`rounded-full border px-2 py-1 nidaan-mono ${
-                    result.verifier.accepted
+                    graphResult.verifier.accepted
                       ? "border-nidaan-success/30 bg-nidaan-success/10 text-nidaan-success"
                       : "border-nidaan-warning/30 bg-nidaan-warning/10 text-nidaan-warning"
                   }`}>
-                    verifier {result.verifier.accepted ? "accepted" : "fallback"}
+                    verifier {graphResult.verifier.accepted ? "accepted" : "fallback"}
                   </span>
                   <span className="rounded-full border border-nidaan-border bg-white px-2 py-1 nidaan-mono text-nidaan-muted">
-                    {result.analysis.dag_nodes.length} nodes · {result.analysis.dag_edges.length} edges
+                    {graphResult.analysis.dag_nodes.length} nodes · {graphResult.analysis.dag_edges.length} edges
                   </span>
                   <span className="rounded-full border border-nidaan-border bg-white px-2 py-1 nidaan-mono text-nidaan-muted">
-                    {shortTimestamp(result.timestamp)}
+                    {shortTimestamp(graphResult.timestamp)}
                   </span>
                 </div>
               ) : (
@@ -1006,7 +1118,7 @@ export default function DashboardPage() {
               )}
             </div>
             <div className="h-[460px]">
-              {loading && !result ? (
+              {loading && !graphResult ? (
                 <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
                   <div className="h-10 w-10 rounded-full border-4 border-nidaan-accent/25 border-t-nidaan-accent animate-spin" />
                   <p className="text-sm font-semibold text-nidaan-ink">
@@ -1016,8 +1128,19 @@ export default function DashboardPage() {
                     First response may take up to 45 seconds. Use <span className="nidaan-mono">Stop</span> to cancel and load a safe fallback.
                   </p>
                 </div>
-              ) : result ? (
-                <CausalGraph nodes={result.analysis.dag_nodes} edges={result.analysis.dag_edges} />
+              ) : graphResult ? (
+                <div className="relative h-full">
+                  <CausalGraph nodes={graphResult.analysis.dag_nodes} edges={graphResult.analysis.dag_edges} />
+                  {loading && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-nidaan-paper/70 backdrop-blur-[1px]">
+                      <div className="rounded-2xl border border-nidaan-accent/25 bg-white/90 px-4 py-2 text-center">
+                        <p className="text-xs font-semibold text-nidaan-accent-strong">
+                          {analysisStage || "Running next analysis..."}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
               ) : (
                 <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
                   <div className="nidaan-display text-5xl text-nidaan-accent/30">DAG</div>
@@ -1173,7 +1296,7 @@ export default function DashboardPage() {
           )}
 
           {result && (
-            <article className="nidaan-card p-5">
+            <article id="analyst-feedback-loop" className="nidaan-card p-5">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <h3 className="nidaan-display text-lg font-semibold text-nidaan-ink">Analyst Feedback Loop</h3>
                 <span className="nidaan-mono text-[10px] uppercase tracking-wider text-nidaan-muted">{result.analysis_id}</span>

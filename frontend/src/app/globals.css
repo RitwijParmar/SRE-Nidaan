@@ -26,9 +26,16 @@ html,
 body {
   margin: 0;
   padding: 0;
+  background: var(--nidaan-shell);
+  color: var(--nidaan-ink);
+}
+
+html {
+  color-scheme: light;
 }
 
 body {
+  min-height: 100vh;
   font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
   background: var(--nidaan-shell);
   color: var(--nidaan-ink);
@@ -60,6 +67,8 @@ a {
 
 .nidaan-shell {
   position: relative;
+  isolation: isolate;
+  overflow: clip;
   background:
     linear-gradient(180deg, #fbf8f2 0%, #f3eee5 100%),
     radial-gradient(circle at 12% 14%, rgba(15, 118, 110, 0.15), transparent 40%),
@@ -150,6 +159,13 @@ a {
 
 .metric-alert {
   animation: metricAlert 2.2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-beacon,
+  .metric-alert {
+    animation: none;
+  }
 }
 
 .react-flow__background {
