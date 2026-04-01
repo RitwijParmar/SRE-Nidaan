@@ -1,17 +1,31 @@
-This is SRE Nidaan, a causal incident response copilot built for real on-call situations.
+Welcome to SRE Nidaan.
+This quick demo shows exactly how to use it during an incident.
 
-We start by capturing the incident signal, customer impact, recent change context, and affected services.
-Then we run analysis.
+Step one.
+Start with incident context.
+Fill the primary signal, customer impact, recent change context, and affected services.
+You can also select a preset to speed things up.
 
-In the backend, orchestration pulls structured telemetry through an MCP-inspired tool routing layer, and sends grounded context to the model stack aligned with QLoRA SFT, reward modeling, and RLHF.
+Step two.
+Build or edit the final incident brief, then click Analyze Incident.
+The system runs grounded reasoning, not just a generic text response.
 
-The output is not a generic paragraph.
-It is structured incident reasoning: root cause hypothesis, intervention logic, and a causal graph that lets responders inspect upstream and downstream effects.
+Step three.
+Review the output in three parts:
+root cause, intervention logic, and the causal graph.
+Use the graph inspector to check upstream and downstream relations before acting.
 
-Next, the operator reviews evidence and confidence before action.
-Interventions stay human-gated, so approval requires explicit reasoning and remains auditable.
+Step four.
+Move to safety approval.
+If you want to proceed, provide a clear reason and authorize intervention.
+This keeps action human-gated and auditable.
 
-Finally, analyst feedback is captured to improve future behavior.
+Step five.
+Submit analyst feedback.
+Mark useful or add corrections so future responses improve.
 
-The goal is simple:
-not AI autopilot, but a practical copilot that helps teams reason faster and safer during incidents.
+Under the hood, SRE Nidaan uses QLoRA SFT, reward modeling, and RLHF,
+with an MCP-inspired tool layer for controlled telemetry calls.
+
+That is the full flow:
+describe, analyze, verify, authorize, and improve.

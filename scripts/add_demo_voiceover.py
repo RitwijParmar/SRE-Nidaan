@@ -13,6 +13,7 @@ Output:
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -24,11 +25,11 @@ PRESENTATIONS = ROOT / "presentations"
 INPUT_VIDEO = PRESENTATIONS / "SRE_Nidaan_Demo_Recording.webm"
 SCRIPT_PATH = PRESENTATIONS / "voiceover_script.txt"
 VOICE_AUDIO_AIFF = PRESENTATIONS / "SRE_Nidaan_Demo_Voiceover.aiff"
-VOICE_AUDIO_M4A = PRESENTATIONS / "SRE_Nidaan_Demo_Recording_Voiceover.m4a"
-OUTPUT_VIDEO = PRESENTATIONS / "SRE_Nidaan_Demo_Recording_Voiceover.mp4"
+VOICE_AUDIO_M4A = PRESENTATIONS / "SRE_Nidaan_Demo_Recording_Voiceover_Indian.m4a"
+OUTPUT_VIDEO = PRESENTATIONS / "SRE_Nidaan_Demo_Recording_Voiceover_Indian.mp4"
 
 
-def run_say_tts(script_text: str, voice: str = "Samantha", rate: int = 165) -> None:
+def run_say_tts(script_text: str, voice: str, rate: int) -> None:
     cmd = ["say", "-v", voice, "-r", str(rate), "-o", str(VOICE_AUDIO_AIFF), script_text]
     subprocess.run(cmd, check=True)
 
@@ -84,7 +85,9 @@ def main() -> None:
     if not script_text:
         raise ValueError("Voiceover script is empty.")
 
-    run_say_tts(script_text=script_text)
+    voice = os.environ.get("MAC_TTS_VOICE", "Rishi")
+    rate = int(os.environ.get("MAC_TTS_RATE", "165"))
+    run_say_tts(script_text=script_text, voice=voice, rate=rate)
     convert_audio_to_m4a()
     merge_audio_video()
     print(f"Created narrated video: {OUTPUT_VIDEO}")
@@ -92,4 +95,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

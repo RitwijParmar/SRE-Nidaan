@@ -26,5 +26,5 @@ Thumbs.db
 results/
 feedback/
 presentations/_raw_recordings/
-presentations/*_Voiceover.aiff
-presentations/*_Voiceover.m4a
+presentations/*Voiceover*.aiff
+presentations/*Voiceover*.m4a
