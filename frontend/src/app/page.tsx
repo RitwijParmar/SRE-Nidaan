@@ -411,6 +411,8 @@ export default function DashboardPage() {
   const [integrationCheckMessage, setIntegrationCheckMessage] = useState<string | null>(null);
   const analysisAbortRef = useRef<AbortController | null>(null);
   const analysisRunRef = useRef(0);
+  const latestHealthRef = useRef<HealthPayload | null>(null);
+  const didBootstrapRef = useRef(false);
 
   const serviceLinks = useMemo(
     () => [
@@ -465,6 +467,7 @@ export default function DashboardPage() {
       }
 
       setHealth(healthPayload);
+      latestHealthRef.current = healthPayload;
       setBrainHealth(brainPayload);
       setTelemetry(telemetryPayload);
       setCandidateCount(Math.max(1, Math.min(8, healthPayload.default_candidate_count || 3)));
@@ -486,7 +489,7 @@ export default function DashboardPage() {
       setIntegrationCheckMessage("Running integration check...");
 
       try {
-        const sourceHealth = seedHealth ?? health ?? (await refreshRuntime());
+        const sourceHealth = seedHealth ?? latestHealthRef.current ?? (await refreshRuntime());
         const [integrationRes, telemetryRes] = await Promise.all([
           fetchWithTimeout(`${API_BASE}/integration-check`, {}, NETWORK_TIMEOUT_MS),
           fetchWithTimeout(`${API_BASE}/telemetry`, {}, NETWORK_TIMEOUT_MS),
@@ -564,10 +567,15 @@ export default function DashboardPage() {
         setCheckingIntegration(false);
       }
     },
-    [API_BASE, health, refreshRuntime]
+    [API_BASE, refreshRuntime]
   );
 
   useEffect(() => {
+    if (didBootstrapRef.current) {
+      return;
+    }
+    didBootstrapRef.current = true;
+
     let disposed = false;
 
     async function bootstrap() {
