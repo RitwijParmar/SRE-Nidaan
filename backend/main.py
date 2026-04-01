@@ -17,6 +17,8 @@ import os
 import re
 import random
 import sys
+import urllib.error
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
@@ -440,6 +442,30 @@ def _feedback_log_file() -> Path:
     return path
 
 
+def _to_brain_health_url(vllm_endpoint: str) -> str:
+    endpoint = (vllm_endpoint or "").rstrip("/")
+    if endpoint.endswith("/v1"):
+        endpoint = endpoint[:-3]
+    return f"{endpoint}/health"
+
+
+async def _probe_json_url(url: str, timeout_seconds: float = 6.0) -> tuple[bool, dict[str, Any] | None]:
+    def _fetch() -> tuple[bool, dict[str, Any] | None]:
+        try:
+            with urllib.request.urlopen(url, timeout=timeout_seconds) as response:
+                body = response.read().decode("utf-8", errors="ignore")
+                if response.status < 200 or response.status >= 300:
+                    return False, None
+                try:
+                    return True, json.loads(body)
+                except Exception:
+                    return True, None
+        except (urllib.error.URLError, TimeoutError, ValueError):
+            return False, None
+
+    return await asyncio.to_thread(_fetch)
+
+
 async def _generate_candidate_analyses(
     user_content: str,
     *,
@@ -622,6 +648,36 @@ async def get_refutation_result() -> dict[str, Any]:
 @app.get("/api/telemetry")
 async def get_telemetry() -> dict[str, Any]:
     return fetch_system_telemetry()
+
+
+@app.get("/api/integration-check")
+async def integration_check() -> dict[str, Any]:
+    brain_health_url = _to_brain_health_url(VLLM_ENDPOINT)
+    brain_ok, brain_payload = await _probe_json_url(brain_health_url)
+    brain_status = "offline"
+    if brain_ok:
+        brain_status = str((brain_payload or {}).get("status", "online"))
+
+    return {
+        "status": "ok" if brain_ok else "degraded",
+        "service": "sre-nidaan-body",
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "services": {
+            "face": "browser-origin",
+            "body": "online",
+            "telemetry_api": "online",
+            "brain": brain_status,
+        },
+        "endpoints": {
+            "body_health": "/health",
+            "telemetry_api": "/api/telemetry",
+            "brain_health": brain_health_url,
+        },
+        "notes": [
+            "Use this endpoint for one-click integration diagnostics.",
+            "Brain status is probed from the configured VLLM endpoint.",
+        ],
+    }
 
 
 @app.get("/health")

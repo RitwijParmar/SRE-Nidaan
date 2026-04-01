@@ -572,13 +572,12 @@ export default function DashboardPage() {
             >
               API Docs
             </a>
-            <button
-              onClick={() => void runIntegrationCheck(health)}
-              disabled={checkingIntegration}
-              className="rounded-full border border-nidaan-border bg-white px-4 py-2 text-sm font-medium text-nidaan-ink transition hover:border-nidaan-accent/40 hover:text-nidaan-accent disabled:cursor-not-allowed disabled:opacity-60"
+            <a
+              href={`${BODY_BASE}/api/integration-check`}
+              className="rounded-full border border-nidaan-border bg-white px-4 py-2 text-sm font-medium text-nidaan-ink transition hover:border-nidaan-accent/40 hover:text-nidaan-accent"
             >
-              {checkingIntegration ? "Checking..." : "Integration Check"}
-            </button>
+              Integration Check
+            </a>
           </div>
           {integrationCheckMessage && (
             <p className="nidaan-mono text-[11px] text-nidaan-muted lg:text-right">
