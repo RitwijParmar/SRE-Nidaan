@@ -1,4 +1,4 @@
-# SRE Nidaan LinkedIn Shotlist (90 sec)
+# SRE Nidaan Shotlist (90 sec)
 
 ## 0:00 - 0:10
 - Show product home and title.
