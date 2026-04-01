@@ -16,6 +16,7 @@ import logging
 import os
 import re
 import random
+import sqlite3
 import sys
 import urllib.error
 import urllib.request
@@ -24,8 +25,9 @@ from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
 
-from fastapi import BackgroundTasks, FastAPI
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 
@@ -52,6 +54,21 @@ def _env_int(name: str, default: int, minimum: int, maximum: int) -> int:
         return default
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    raw_value = os.environ.get(name)
+    if raw_value is None:
+        return default
+    return raw_value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_csv(name: str, default: str) -> list[str]:
+    raw_value = os.environ.get(name, default)
+    values = [item.strip() for item in raw_value.split(",") if item.strip()]
+    if values:
+        return values
+    return [item.strip() for item in default.split(",") if item.strip()]
+
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -68,6 +85,16 @@ GROUNDING_KB_PATH = os.environ.get(
 )
 FEEDBACK_LOG_PATH = os.environ.get(
     "FEEDBACK_LOG_PATH", str(ROOT_DIR / "feedback" / "analyst_feedback.jsonl")
+)
+FEEDBACK_DB_PATH = os.environ.get(
+    "FEEDBACK_DB_PATH", str(ROOT_DIR / "feedback" / "analyst_feedback.db")
+)
+TELEMETRY_SOURCE_URL = os.environ.get("TELEMETRY_SOURCE_URL", "").strip()
+API_AUTH_TOKEN = os.environ.get("API_AUTH_TOKEN", "").strip()
+REQUIRE_TENANT_ID = _env_bool("REQUIRE_TENANT_ID", True)
+ALLOWED_ORIGINS = _env_csv(
+    "ALLOWED_ORIGINS",
+    "http://localhost:3000,https://sre-nidaan-face-ciiiagnzaq-uk.a.run.app",
 )
 DEFAULT_CANDIDATE_COUNT = _env_int("GENERATION_CANDIDATES", 3, 1, 8)
 DEFAULT_GROUNDING_LIMIT = _env_int("GROUNDING_EVIDENCE_LIMIT", 4, 1, 8)
@@ -90,11 +117,33 @@ app = FastAPI(
 )
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def enforce_api_security(request: Request, call_next):
+    path = request.url.path
+    if path.startswith("/api/"):
+        tenant_id = request.headers.get("x-tenant-id", "").strip()
+        if REQUIRE_TENANT_ID and not tenant_id:
+            return JSONResponse(
+                status_code=400,
+                content={"detail": "missing required header: x-tenant-id"},
+            )
+        if API_AUTH_TOKEN:
+            provided_token = request.headers.get("x-api-key", "").strip()
+            if provided_token != API_AUTH_TOKEN:
+                return JSONResponse(
+                    status_code=401,
+                    content={"detail": "invalid api key"},
+                )
+
+    response = await call_next(request)
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -203,26 +252,156 @@ class FeedbackAck(BaseModel):
     timestamp: str
 
 
+class InterventionAuthorizationRequest(BaseModel):
+    analysis_id: str
+    operator_id: str = Field(..., min_length=2, max_length=120)
+    tenant_id: str = Field(..., min_length=1, max_length=120)
+    reason: str = Field(..., min_length=8, max_length=2000)
+    approved_action: str = Field(default="", max_length=2000)
+
+
+class InterventionAuthorizationAck(BaseModel):
+    status: str
+    authorization_id: str
+    analysis_id: str
+    tenant_id: str
+    timestamp: str
+
+
+class MCPToolDescriptor(BaseModel):
+    name: str
+    description: str
+    input_schema: dict[str, Any] = Field(default_factory=dict)
+
+
+class MCPCallRequest(BaseModel):
+    tool_name: str
+    arguments: dict[str, Any] = Field(default_factory=dict)
+
+
+class MCPCallResponse(BaseModel):
+    tool_name: str
+    result: dict[str, Any]
+
+
 # ---------------------------------------------------------------------------
 # Mock MCP Tools - Data Layer
 # ---------------------------------------------------------------------------
 
-def fetch_system_telemetry() -> dict[str, Any]:
+STATIC_TELEMETRY: dict[str, Any] = {
+    "frontend": {
+        "status": "503 Gateway Timeout",
+        "error_rate": "Spiking",
+    },
+    "auth_service": {
+        "cpu_utilization": "96%",
+        "latency_ms": 4500,
+        "replicas": 5,
+    },
+    "database": {
+        "connections": "990/1000 (99%)",
+        "wait_event": "ClientRead (Locked)",
+    },
+}
+
+
+class MCPRouter:
+    def __init__(self) -> None:
+        self._tools: dict[str, tuple[str, dict[str, Any], Any]] = {}
+
+    def register_tool(
+        self,
+        *,
+        name: str,
+        description: str,
+        input_schema: dict[str, Any],
+        handler: Any,
+    ) -> None:
+        self._tools[name] = (description, input_schema, handler)
+
+    def list_tools(self) -> list[MCPToolDescriptor]:
+        return [
+            MCPToolDescriptor(
+                name=name,
+                description=description,
+                input_schema=input_schema,
+            )
+            for name, (description, input_schema, _handler) in sorted(self._tools.items())
+        ]
+
+    def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        record = self._tools.get(tool_name)
+        if not record:
+            raise ValueError(f"unknown MCP tool: {tool_name}")
+        _description, _input_schema, handler = record
+        payload = handler(arguments or {})
+        if not isinstance(payload, dict):
+            raise ValueError(f"MCP tool {tool_name} returned non-dict payload")
+        return payload
+
+
+def _coerce_telemetry_payload(raw_payload: Any) -> dict[str, Any]:
+    if not isinstance(raw_payload, dict):
+        raise ValueError("telemetry payload must be an object")
+
+    candidate = raw_payload.get("telemetry") if "telemetry" in raw_payload else raw_payload
+    if not isinstance(candidate, dict):
+        raise ValueError("telemetry payload missing object map")
+
+    normalized: dict[str, Any] = {}
+    for service_name, metrics in candidate.items():
+        if not isinstance(service_name, str) or not isinstance(metrics, dict):
+            continue
+        normalized[service_name] = metrics
+    if not normalized:
+        raise ValueError("telemetry payload has no valid services")
+    return normalized
+
+
+def _tool_get_telemetry(arguments: dict[str, Any]) -> dict[str, Any]:
+    source_url = str(arguments.get("source_url") or TELEMETRY_SOURCE_URL).strip()
+    if source_url:
+        try:
+            with urllib.request.urlopen(source_url, timeout=8.0) as response:
+                body = response.read().decode("utf-8", errors="ignore")
+                payload = json.loads(body)
+                telemetry = _coerce_telemetry_payload(payload)
+                return {
+                    "telemetry": telemetry,
+                    "source": f"live-http:{source_url}",
+                    "collected_at": datetime.now(timezone.utc).isoformat(),
+                }
+        except Exception as exc:
+            logger.warning("Telemetry source fetch failed (%s), using static snapshot.", exc)
+
     return {
-        "frontend": {
-            "status": "503 Gateway Timeout",
-            "error_rate": "Spiking",
-        },
-        "auth_service": {
-            "cpu_utilization": "96%",
-            "latency_ms": 4500,
-            "replicas": 5,
-        },
-        "database": {
-            "connections": "990/1000 (99%)",
-            "wait_event": "ClientRead (Locked)",
-        },
+        "telemetry": STATIC_TELEMETRY,
+        "source": "simulated-static",
+        "collected_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+MCP_ROUTER = MCPRouter()
+MCP_ROUTER.register_tool(
+    name="sre.telemetry.get_snapshot",
+    description="Return telemetry snapshot for incident analysis with source attribution.",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "source_url": {"type": "string"},
+        },
+        "additionalProperties": False,
+    },
+    handler=_tool_get_telemetry,
+)
+
+
+def fetch_system_telemetry() -> dict[str, Any]:
+    payload = MCP_ROUTER.call_tool("sre.telemetry.get_snapshot", {})
+    telemetry = payload.get("telemetry")
+    if not isinstance(telemetry, dict):
+        return STATIC_TELEMETRY
+    return telemetry
 
 
 # ---------------------------------------------------------------------------
@@ -322,6 +501,8 @@ async def run_refutation_test(analysis: CausalAnalysisResponse) -> dict[str, Any
 
 
 _refutation_results: dict[str, Any] = {}
+_analysis_cache: dict[str, dict[str, Any]] = {}
+_analysis_tenants: dict[str, str] = {}
 
 
 async def _run_refutation_background(analysis: CausalAnalysisResponse) -> None:
@@ -442,6 +623,50 @@ def _feedback_log_file() -> Path:
     return path
 
 
+def _feedback_db_file() -> Path:
+    path = Path(FEEDBACK_DB_PATH)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _feedback_db_connection() -> sqlite3.Connection:
+    db_path = _feedback_db_file()
+    connection = sqlite3.connect(str(db_path))
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS analyst_feedback (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            analysis_id TEXT NOT NULL,
+            rating TEXT NOT NULL,
+            correction TEXT NOT NULL,
+            operator_id TEXT NOT NULL,
+            tenant_id TEXT NOT NULL,
+            incident_summary TEXT NOT NULL,
+            analysis_json TEXT NOT NULL,
+            verifier_json TEXT NOT NULL,
+            generation_metadata_json TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS intervention_authorizations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            authorization_id TEXT NOT NULL UNIQUE,
+            analysis_id TEXT NOT NULL,
+            operator_id TEXT NOT NULL,
+            tenant_id TEXT NOT NULL,
+            reason TEXT NOT NULL,
+            approved_action TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    return connection
+
+
 def _to_brain_health_url(vllm_endpoint: str) -> str:
     endpoint = (vllm_endpoint or "").rstrip("/")
     if endpoint.endswith("/v1"):
@@ -514,7 +739,9 @@ client = AsyncOpenAI(
 async def analyze_incident(
     payload: AnalyzeIncidentRequest,
     background_tasks: BackgroundTasks,
+    request: Request,
 ) -> IncidentAnalysisResult:
+    request_tenant_id = request.headers.get("x-tenant-id", "default").strip() or "default"
     telemetry = payload.telemetry_override or fetch_system_telemetry()
     grounding_evidence_payload = retrieve_grounding_evidence(
         telemetry,
@@ -611,23 +838,59 @@ async def analyze_incident(
         telemetry_snapshot=telemetry,
         refutation_status="running",
     )
+    _analysis_cache[analysis_id] = result.model_dump()
+    _analysis_tenants[analysis_id] = request_tenant_id
     background_tasks.add_task(_run_refutation_background, analysis)
     return result
 
 
 @app.post("/api/analysis-feedback", response_model=FeedbackAck)
-async def analysis_feedback(payload: FeedbackSubmission) -> FeedbackAck:
+async def analysis_feedback(payload: FeedbackSubmission, request: Request) -> FeedbackAck:
+    tenant_id = request.headers.get("x-tenant-id", "default")
     record = {
         "analysis_id": payload.analysis_id,
         "rating": payload.rating,
         "correction": payload.correction.strip(),
         "operator": payload.operator.strip() or "anonymous",
+        "tenant_id": tenant_id,
         "incident_summary": payload.incident_summary.strip(),
         "analysis": payload.analysis or {},
         "verifier": payload.verifier or {},
         "generation_metadata": payload.generation_metadata or {},
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
+
+    with _feedback_db_connection() as connection:
+        connection.execute(
+            """
+            INSERT INTO analyst_feedback (
+                analysis_id,
+                rating,
+                correction,
+                operator_id,
+                tenant_id,
+                incident_summary,
+                analysis_json,
+                verifier_json,
+                generation_metadata_json,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                record["analysis_id"],
+                record["rating"],
+                record["correction"],
+                record["operator"],
+                record["tenant_id"],
+                record["incident_summary"],
+                json.dumps(record["analysis"]),
+                json.dumps(record["verifier"]),
+                json.dumps(record["generation_metadata"]),
+                record["timestamp"],
+            ),
+        )
+
     with _feedback_log_file().open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(record) + "\n")
     logger.info("Analyst feedback recorded for %s", payload.analysis_id)
@@ -650,10 +913,26 @@ async def get_telemetry() -> dict[str, Any]:
     return fetch_system_telemetry()
 
 
+@app.get("/api/mcp/tools", response_model=list[MCPToolDescriptor])
+async def list_mcp_tools() -> list[MCPToolDescriptor]:
+    return MCP_ROUTER.list_tools()
+
+
+@app.post("/api/mcp/call", response_model=MCPCallResponse)
+async def call_mcp_tool(payload: MCPCallRequest) -> MCPCallResponse:
+    try:
+        result = MCP_ROUTER.call_tool(payload.tool_name, payload.arguments)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return MCPCallResponse(tool_name=payload.tool_name, result=result)
+
+
 @app.get("/api/integration-check")
 async def integration_check() -> dict[str, Any]:
     brain_health_url = _to_brain_health_url(VLLM_ENDPOINT)
     brain_ok, brain_payload = await _probe_json_url(brain_health_url)
+    telemetry_probe = MCP_ROUTER.call_tool("sre.telemetry.get_snapshot", {})
+    telemetry_source = str(telemetry_probe.get("source", "unknown"))
     brain_status = "offline"
     if brain_ok:
         brain_status = str((brain_payload or {}).get("status", "online"))
@@ -676,8 +955,98 @@ async def integration_check() -> dict[str, Any]:
         "notes": [
             "Use this endpoint for one-click integration diagnostics.",
             "Brain status is probed from the configured VLLM endpoint.",
+            f"Telemetry source: {telemetry_source}",
         ],
     }
+
+
+@app.post("/api/interventions/authorize", response_model=InterventionAuthorizationAck)
+async def authorize_intervention(
+    payload: InterventionAuthorizationRequest,
+    request: Request,
+) -> InterventionAuthorizationAck:
+    request_tenant_id = request.headers.get("x-tenant-id", "").strip()
+    if request_tenant_id and request_tenant_id != payload.tenant_id.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="tenant_id mismatch between header and payload",
+        )
+
+    analysis_payload = _analysis_cache.get(payload.analysis_id)
+    if not analysis_payload:
+        raise HTTPException(
+            status_code=404,
+            detail=f"analysis_id not found: {payload.analysis_id}",
+        )
+    expected_tenant_id = _analysis_tenants.get(payload.analysis_id)
+    if expected_tenant_id and expected_tenant_id != payload.tenant_id.strip():
+        raise HTTPException(
+            status_code=403,
+            detail="analysis_id belongs to a different tenant",
+        )
+
+    if not bool(analysis_payload.get("requires_human_approval", True)):
+        raise HTTPException(
+            status_code=409,
+            detail="analysis does not require human approval",
+        )
+
+    timestamp = datetime.now(timezone.utc).isoformat()
+    authorization_id = f"auth-{uuid4().hex[:12]}"
+    approved_action = payload.approved_action.strip() or str(
+        analysis_payload.get("analysis", {}).get("recommended_action", "")
+    )
+    record = {
+        "authorization_id": authorization_id,
+        "analysis_id": payload.analysis_id,
+        "operator_id": payload.operator_id.strip(),
+        "tenant_id": payload.tenant_id.strip(),
+        "reason": payload.reason.strip(),
+        "approved_action": approved_action,
+        "analysis_payload": analysis_payload,
+        "timestamp": timestamp,
+    }
+
+    with _feedback_db_connection() as connection:
+        connection.execute(
+            """
+            INSERT INTO intervention_authorizations (
+                authorization_id,
+                analysis_id,
+                operator_id,
+                tenant_id,
+                reason,
+                approved_action,
+                payload_json,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                record["authorization_id"],
+                record["analysis_id"],
+                record["operator_id"],
+                record["tenant_id"],
+                record["reason"],
+                record["approved_action"],
+                json.dumps(record["analysis_payload"]),
+                record["timestamp"],
+            ),
+        )
+
+    logger.info(
+        "Intervention authorized: %s by %s tenant=%s",
+        authorization_id,
+        record["operator_id"],
+        record["tenant_id"],
+    )
+    return InterventionAuthorizationAck(
+        status="authorized",
+        authorization_id=authorization_id,
+        analysis_id=payload.analysis_id,
+        tenant_id=record["tenant_id"],
+        timestamp=timestamp,
+    )
 
 
 @app.get("/health")
@@ -694,6 +1063,10 @@ async def health() -> dict[str, Any]:
         "generation_max_tokens": GENERATION_MAX_TOKENS,
         "vllm_request_timeout_seconds": VLLM_REQUEST_TIMEOUT_SECONDS,
         "vllm_max_retries": VLLM_MAX_RETRIES,
+        "mcp_tools_registered": len(MCP_ROUTER.list_tools()),
+        "telemetry_source_url": TELEMETRY_SOURCE_URL or "simulated-static",
+        "require_tenant_id": REQUIRE_TENANT_ID,
+        "api_auth_enabled": bool(API_AUTH_TOKEN),
     }
 
 
