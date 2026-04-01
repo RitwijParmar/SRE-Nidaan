@@ -1,0 +1,11 @@
+I’ve been working on SRE निदान (SRE-Nidaan) for that incident moment when everyone asks:
+What broke first? What should we do now? What should we definitely not touch?
+
+This is not an “AI solves SRE” claim. It’s a practical copilot approach for clearer, safer reasoning under pressure.
+
+Under the hood: a 3-service architecture (inference + orchestration + safety gating), with a model pipeline using QLoRA SFT, reward modeling, and RLHF, plus an MCP-inspired tool layer for controlled telemetry calls.
+
+Early, imperfect but seems useful in practice.
+
+Product: https://sre-nidaan-122722888597.us-east4.run.app
+GitHub: https://github.com/RitwijParmar/SRE-Nidaan
