@@ -1,277 +1,349 @@
-# SRE-Nidaan — NEXUS-CAUSAL v3.1
+# SRE-Nidaan (SRE निदान)
 
 [![Model](https://img.shields.io/badge/Model-Meta--Llama--3--8B--Instruct-orange.svg)](https://huggingface.co/meta-llama/Meta-Llama-3-8B-Instruct)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python](https://img.shields.io/badge/Python-3.9+-3776AB.svg)](https://www.python.org/)
 [![Framework](https://img.shields.io/badge/Framework-NEXUS--CAUSAL_v3.1-green.svg)](https://github.com/RitwijParmar/NEXUS-CAUSAL-v3.1)
 
-**Causal AI Site Reliability Engineering System**
+Production-focused causal incident response copilot for SRE teams.
 
-An end-to-end distributed system that prevents catastrophic **"panic scaling"** in cloud-native environments by replacing standard correlational AI with formal causal reasoning (Pearl's *do*-calculus). Powered by the [NEXUS-CAUSAL v3.1](https://github.com/RitwijParmar/NEXUS-CAUSAL-v3.1.git) fine-tuned Meta Llama 3 8B Instruct model.
+SRE-Nidaan is a 3-service system (`Face + Body + Brain`) that combines:
 
-The system achieves **76% exact match accuracy** on the CLADDER benchmark with optimized prompting, outperforming GPT-4 (62%) using a 7B parameter model.
-
----
-
-## 🎯 The Problem
-
-Standard AI-driven SRE tools use correlational analysis to generate alerts and auto-scaling decisions. When a database connection pool fills up, they naively scale upstream services — which **worsens** the outage by opening more connections. This "panic scaling" is a confounding error that Pearl's Causal Hierarchy can structurally prevent.
+- structured incident analysis with causal DAG output
+- grounding against telemetry + knowledge base evidence
+- MCP-style tool routing in the backend
+- strict human approval gating before interventions
+- analyst feedback capture for continuous improvement
 
 ---
 
-## ✨ Our Solution: The NEXUS-CAUSAL SRE Pipeline
+## Live Product
 
-We apply the [NEXUS-CAUSAL v3.1](https://github.com/RitwijParmar/NEXUS-CAUSAL-v3.1.git) three-phase training pipeline to the domain of Site Reliability Engineering:
-
-1. **🧠 Phase 1: Supervised Fine-Tuning (SFT)**
-   - QLoRA fine-tuning on **2,500+ SRE causal incident examples** across 12 infrastructure domains
-   - Custom SRE special tokens: `[ROOT_CAUSE]`, `[BLAST_RADIUS]`, `[SAFETY_CHECK]`, `[DAG]`, etc.
-
-2. **🏆 Phase 2: Multi-Dimensional Reward Modeling**
-   - 7-dimensional reward model scoring: structural accuracy, root cause precision, confounder detection, counterfactual quality, DAG completeness, **blast radius awareness**, **safety compliance**
-
-3. **🚀 Phase 3: Pearl's Ladder RLHF**
-   - Curriculum learning: L1 (Association) → L2 (Intervention) → L3 (Counterfactual)
-   - Safety-aware reward shaping: bonus for enforcing `requires_human_approval`
+- Product (canonical): [https://sre-nidaan-122722888597.us-east4.run.app](https://sre-nidaan-122722888597.us-east4.run.app)
+- Product alias: [https://sre-nidaan-face-122722888597.us-east4.run.app](https://sre-nidaan-face-122722888597.us-east4.run.app)
+- Body API: [https://sre-nidaan-body-122722888597.us-east4.run.app](https://sre-nidaan-body-122722888597.us-east4.run.app)
+- Brain API: [https://sre-nidaan-brain-ciiiagnzaq-uk.a.run.app](https://sre-nidaan-brain-ciiiagnzaq-uk.a.run.app)
 
 ---
 
-## 📊 Dataset: 12 SRE Infrastructure Domains
+## Demo Video
 
-| Domain | Pearl Level | Example Incident |
-|---|---|---|
-| Kubernetes | L2 | Pod eviction cascade from HPA memory contention |
-| Database | L2 | Connection pool exhaustion from auth retry storm |
-| Networking | L1 | Conntrack table overflow causing TCP RSTs |
-| Load Balancer | L2 | Thread exhaustion from slow downstream dependency |
-| DNS | L1 | ndots misconfiguration causing query amplification |
-| Storage | L2 | EBS burst credit depletion during compaction |
-| Authentication | L3 | JWKS thundering herd from key rotation |
-| Message Queue | L2 | Kafka rebalance storm from large poll batches |
-| Cache | L2 | Redis eviction from no-TTL preference objects |
-| CI/CD | L3 | Build cache invalidation from dependency bump |
-| Monitoring | L1 | Prometheus cardinality explosion from unbounded labels |
-| API Gateway | L2 | Noisy client consuming global rate limit quota |
+Click the thumbnail to watch the short narrated product walkthrough:
+
+[![SRE-Nidaan Demo Thumbnail](presentations/SRE_Nidaan_LinkedIn_Thumbnail.png)](presentations/SRE_Nidaan_Demo_Recording_Voiceover_Indian.mp4)
+
+Direct video link:
+- [SRE_Nidaan_Demo_Recording_Voiceover_Indian.mp4](presentations/SRE_Nidaan_Demo_Recording_Voiceover_Indian.mp4)
 
 ---
 
-## 🏗️ Architecture (Split-Compute)
+## Why SRE-Nidaan Exists
 
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│                         SRE-Nidaan Architecture                      │
-├──────────────────────────────────────────────────────────────────────┤
-│                                                                      │
-│  ┌─────────────┐     ┌──────────────────┐     ┌──────────────────┐  │
-│  │  THE FACE   │────▶│    THE BODY      │────▶│   THE BRAIN      │  │
-│  │  Next.js 14 │◀────│    FastAPI       │◀────│   vLLM + LoRA    │  │
-│  │  Port 3000  │     │    Port 8001     │     │   Port 8000      │  │
-│  └─────────────┘     └──────────────────┘     └──────────────────┘  │
-│   React Flow +        Pydantic Schema         Meta-Llama-3-8B      │
-│   Dagre Layout        Safety Plane             + NEXUS-CAUSAL LoRA  │
-│   Tailwind CSS        MCP Router               4-bit Quantization   │
-│                       Refutation Tests         max_lora_rank=64     │
-│                                                                      │
-│  ═══════════════════ DATA FLOW ═════════════════════════════════════ │
-│                                                                      │
-│  1. Frontend sends POST /api/analyze-incident                        │
-│  2. Backend fetches telemetry → builds model-native chat prompt      │
-│  3. Prompt sent to vLLM with Pydantic guided_json decoding           │
-│  4. LLM returns causal DAG (root cause + intervention simulation)    │
-│  5. Backend returns JSON with requires_human_approval: true          │
-│  6. Frontend renders DAG via Dagre + shows safety gate button        │
-│  7. Human operator must click "Authorize Intervention" to proceed    │
-│                                                                      │
-└──────────────────────────────────────────────────────────────────────┘
-```
+In incidents, vanilla LLM responses can sound confident but still be unsafe:
+
+- they often miss confounders
+- they can recommend generic actions without grounding
+- they do not naturally enforce safety gates
+
+SRE-Nidaan addresses this by forcing structured causal outputs, scoring evidence overlap, and requiring human approval before high-impact actions.
 
 ---
 
-## 📂 Project Structure
+## Architecture (Real Diagram)
 
-```
+![SRE-Nidaan Architecture](assets/readme/architecture_split_compute.png)
+
+### Service Responsibilities
+
+- **Face (Next.js)**: operator UI, incident input, graph workspace, safety and feedback actions.
+- **Body (FastAPI)**: orchestration, grounding retrieval, MCP tool calls, candidate verification, and persistence.
+- **Brain (vLLM + LoRA)**: OpenAI-compatible inference serving Meta-Llama-3-8B-Instruct with production adapter.
+
+### End-to-End Incident Flow
+
+1. Operator provides incident brief and telemetry context.
+2. Body fetches telemetry (`sre.telemetry.get_snapshot`) and retrieves grounding evidence from `ops/knowledge_base.json`.
+3. Body prompts Brain with strict schema constraints (`guided_json`).
+4. Body verifies candidate quality (evidence overlap, telemetry overlap, structural viability).
+5. Body either returns accepted live analysis or deterministic grounded fallback.
+6. Face renders DAG + reasoning; intervention requires human authorization.
+7. Analyst feedback is persisted for future reward/preference improvements.
+
+---
+
+## Real Data & Evaluation Charts
+
+All charts below are generated from project artifacts, not hand-drawn placeholders.
+
+### Dataset Composition
+
+![Domain Distribution](assets/readme/dataset_domain_distribution.png)
+![Pearl Level Mix](assets/readme/dataset_pearl_level_mix.png)
+
+### Evaluation Snapshot (`results/final_evaluation_report.json`)
+
+![Category Scores](assets/readme/evaluation_category_scores.png)
+![Domain Scores](assets/readme/evaluation_domain_scores.png)
+![Quality Signals](assets/readme/evaluation_quality_signals.png)
+
+### Runtime/Training Profile
+
+![Training Runtime Profile](assets/readme/training_runtime_profile.png)
+
+---
+
+## Repository Structure
+
+```text
 SRE-Nidaan/
-├── config.py                       # Centralized pipeline configuration
-├── requirements.txt
-├── scripts/                        # Sequential pipeline execution
-│   ├── 01_generate_dataset.py      # Generate 2,500 SRE incident examples
-│   ├── 02_run_sft.py               # QLoRA supervised fine-tuning
-│   ├── 03_train_reward_model.py    # 7D reward model training
-│   ├── 04_run_rlhf.py             # Pearl's Ladder RLHF
-│   └── 05_run_evaluation.py       # Final model evaluation
+├── backend/                      # FastAPI body service
+│   └── main.py
+├── frontend/                     # Next.js face service
+│   ├── src/app/page.tsx
+│   └── src/components/CausalGraph.tsx
+├── src/                          # Training + runtime libraries
+│   ├── data/
+│   ├── training/
+│   ├── evaluation/
+│   ├── runtime/
+│   └── utils/
+├── scripts/                      # Pipeline and utility scripts
+│   ├── 01_generate_dataset.py
+│   ├── 02_run_sft.py
+│   ├── 03_train_reward_model.py
+│   ├── 04_run_rlhf.py
+│   ├── 05_run_evaluation.py
 │   ├── 06_select_best_sft_checkpoint.py
 │   ├── 07_generate_structured_response.py
-│   └── 08_prepare_production_adapter.py
-├── src/                            # Core library
-│   ├── data/
-│   │   └── dataset_generator.py    # Massive SRE dataset generator
-│   ├── training/
-│   │   ├── sft_trainer.py          # SFT with SRE special tokens
-│   │   ├── reward_modeler.py       # 7D reward model (blast radius + safety)
-│   │   └── rlhf_trainer.py         # Pearl's Ladder curriculum RLHF
-│   ├── evaluation/
-│   │   └── evaluator.py            # Multi-level evaluation framework
-│   ├── runtime/
-│   │   └── product_strategy.py     # Grounding retrieval + verifier + fallback
-│   └── utils/
-│       └── model_utils.py          # Model loading & prompt formatting
-├── ops/
-│   └── knowledge_base.json         # Runbooks, topology, and policy grounding docs
-├── inference_server.py             # The Brain: vLLM + LoRA inference
-├── backend/
-│   └── main.py                     # The Body: FastAPI + Safety Plane
-├── frontend/                       # The Face: Next.js 14 Dashboard
-│   ├── src/app/page.tsx
-│   ├── src/components/CausalGraph.tsx
-│   ├── tailwind.config.ts
-│   └── package.json
-└── README.md
+│   ├── 08_prepare_production_adapter.py
+│   ├── record_site_demo.py
+│   ├── add_demo_voiceover.py
+│   └── generate_readme_charts.py
+├── data/sre_nidaan_dataset.json
+├── results/final_evaluation_report.json
+├── ops/knowledge_base.json
+├── inference_server.py           # Brain service
+├── docker-compose.yml
+└── deploy/gcp/                   # Cloud Run deployment assets
 ```
 
 ---
 
-## ⚡ Quick Start
+## Quick Start
 
 ### Prerequisites
 
-- **Python 3.9+** with CUDA support
-- **NVIDIA GPU with ≥16 GB VRAM** (for training; Phases 2–3 backend/frontend work on CPU)
-- **Node.js 18+** (for frontend)
+- Python 3.9+
+- Node.js 18+
+- Docker (optional, recommended for full stack)
+- NVIDIA GPU (required for Brain inference/training workloads)
 
-> [!TIP]
-> **HuggingFace Quota or Free Colab Tier?**
-> The production default is `meta-llama/Meta-Llama-3-8B-Instruct`. If gated access is unavailable or you are running on the free Colab T4 tier, set `USE_FREE_LLM` in your terminal before starting the pipeline:
-> - `export USE_FREE_LLM="1"` -> **TinyLlama-1.1B** (Requires 0 HF token, fits perfectly on free Colab)
-> - `export USE_FREE_LLM="2"` -> **Zephyr-7B-Beta** (ungated 7B fallback, still needs roughly 16 GB VRAM)
-
-### 1. Clone & Install
+Install dependencies:
 
 ```bash
 git clone https://github.com/RitwijParmar/SRE-Nidaan.git
 cd SRE-Nidaan
 pip install -r requirements.txt
-export HF_TOKEN="your_huggingface_token"  # required for Meta-Llama-3
 ```
 
-`requirements.txt` intentionally pins `huggingface_hub<1.0` because newer Hub releases can break this training environment in the standard CUDA container.
+---
 
-### 2. Training Pipeline (Colab / GPU)
+## Local Run (Native)
 
-Run the five phases sequentially:
+### 1) Prepare production adapter
 
 ```bash
-# Phase 1: Generate 2,500 SRE incident training examples
-python scripts/01_generate_dataset.py
-
-# Phase 2: QLoRA Supervised Fine-Tuning (~2-4 hours)
-python scripts/02_run_sft.py
-
-# Phase 3: Train 7D Reward Model (~30-60 minutes)
-python scripts/03_train_reward_model.py
-
-# Phase 4: Pearl's Ladder RLHF (~45-90 minutes)
-python scripts/04_run_rlhf.py
-
-# Phase 5: Evaluate on SRE test suite
-python scripts/05_run_evaluation.py
-```
-
-### 3. Native Local Execution
-
-If you prefer not to use Docker, you can run the services natively:
-
-**The Brain (vLLM inference via ngrok)**
-```bash
-export NGROK_AUTHTOKEN="your-token"
-export MODEL_ID="meta-llama/Meta-Llama-3-8B-Instruct"
+export HF_TOKEN="your_hf_token"
 python scripts/08_prepare_production_adapter.py
+```
+
+### 2) Start Brain
+
+```bash
+export MODEL_ID="meta-llama/Meta-Llama-3-8B-Instruct"
+export NEXUS_LORA_PATH="$(pwd)/results/production_adapter"
 python inference_server.py
 ```
 
-**The Body (FastAPI Backend)**
+### 3) Start Body
+
 ```bash
 export VLLM_ENDPOINT="http://localhost:8000/v1"
 export MODEL_ID="meta-llama/Meta-Llama-3-8B-Instruct"
 export PRODUCTION_ARTIFACT_LABEL="checkpoint-1064"
-uvicorn backend.main:app --port 8001 --reload
+uvicorn backend.main:app --host 0.0.0.0 --port 8001 --reload
 ```
 
-**The Face (Next.js Frontend)**
+### 4) Start Face
+
 ```bash
-cd frontend && npm install && npm run dev
+cd frontend
+npm install
+NEXT_PUBLIC_API_URL=http://localhost:8001 npm run dev
 ```
 
-### 4. Docker Deployment (Recommended for Production)
+Open [http://localhost:3000](http://localhost:3000)
 
-The production path intentionally serves the stable SFT baseline (`checkpoint-1064`) with grounding, verifier scoring, and analyst feedback capture in front of it. Prepare the adapter once, then launch the full 3-tier stack:
+---
+
+## Docker Run (3 Services)
 
 ```bash
-export HF_TOKEN="your_huggingface_token"
+export HF_TOKEN="your_hf_token"
 export MODEL_ID="meta-llama/Meta-Llama-3-8B-Instruct"
 python scripts/08_prepare_production_adapter.py
 docker-compose up --build -d
 ```
-This spins up:
-- The Face on `3000`
-- The Body on `8001`
-- The Brain on `8000`
 
-The backend will:
-- retrieve grounding evidence from `ops/knowledge_base.json`
-- generate multiple candidates from the base + LoRA path
-- verify telemetry/evidence overlap
-- fall back to a deterministic safe answer when candidates are too generic
-- log analyst feedback to `feedback/analyst_feedback.jsonl`
+Default ports:
 
-### 5. Production Strategy
-
-This repo now treats RLHF as an optional research track, not the serving default. The deployed product path is:
-
-1. `checkpoint-1064` as the stable SFT baseline
-2. grounding retrieval over runbooks, topology, and policy docs
-3. candidate verification and safe fallback selection
-4. analyst feedback capture for future prompt-matched preference tuning
-
-If `results/sft_model/checkpoint-1064` is not present locally, `scripts/08_prepare_production_adapter.py` will try to pull the adapter from `ritwijar/SRE-Nidaan-Production` using your Hugging Face token.
+- Face: `3000`
+- Body: `8001`
+- Brain: `8000`
 
 ---
 
-## 🛠️ Key Design Decisions
+## GCP Cloud Run Deployment
 
-| Decision | Rationale |
-|---|---|
-| `max_lora_rank=64` | Caps GPU memory during adapter swaps; prevents `cudaMemcpyAsync` latency spikes |
-| Pydantic `guided_json` | Deterministic JSON generation — never relies on prompt alone |
-| Model-native chat prompts | Shared formatter keeps training, evaluation, backend, and vLLM aligned across Llama 3 and fallback models |
-| Concise prompts (no CausalCoT) | Optimized Prompting: 76% CLADDER vs CausalCoT 41% |
-| Read-only copilot pattern | Backend never auto-executes — human must authorize |
-| 7D reward model | Adds blast_radius_awareness + safety_compliance to NEXUS-CAUSAL's 7 dimensions |
-| Background refutation tests | Validates causal estimates with placebo confounders |
-| 2,500 training examples | 12 SRE domains × parameterized templates with Pearl's level labels |
+Use the deployment script:
 
----
+```bash
+export PROJECT_ID="your-gcp-project"
+export REGION="us-east4"
+export HF_TOKEN="your_hf_token"
+bash deploy/gcp/deploy_cloud_run.sh
+```
 
-## 🛡️ Hardware Requirements
+What it does:
 
-| Phase | GPU | Time |
-|---|---|---|
-| Data Generation | CPU only | ~1 minute |
-| SFT Training | ≥16 GB VRAM | ~2-4 hours |
-| Reward Model | ≥16 GB VRAM | ~30-60 min |
-| RLHF Training | ≥16 GB VRAM | ~45-90 min |
-| Inference (vLLM) | ≥16 GB VRAM | Continuous |
-| Backend (FastAPI) | CPU | Continuous |
-| Frontend (Next.js) | CPU | Continuous |
+- builds/pushes Face, Body, Brain images via Cloud Build
+- deploys Brain on GPU (`nvidia-l4`)
+- deploys Body and wires it to Brain `/v1`
+- deploys Face and wires it to Body URL
 
 ---
 
-## 📖 NEXUS-CAUSAL v3.1
+## API Surface
 
-**Repository:** https://github.com/RitwijParmar/NEXUS-CAUSAL-v3.1.git
+### Health and integration
 
-- **Base Model:** `meta-llama/Meta-Llama-3-8B-Instruct`
-- **Training:** 3-phase pipeline — QLoRA SFT → Reward Modeling → Pearl's Ladder RLHF
-- **Performance:** 76.0% accuracy on CLADDER benchmark (Optimized Prompting)
+- `GET /health`
+- `GET /api/integration-check`
+- `GET /api/telemetry`
+
+### Core analysis flow
+
+- `POST /api/analyze-incident`
+- `POST /api/interventions/authorize`
+- `POST /api/analysis-feedback`
+
+### MCP tool endpoints
+
+- `GET /api/mcp/tools`
+- `POST /api/mcp/call`
+
+### Example: analyze incident
+
+```bash
+curl -X POST "http://localhost:8001/api/analyze-incident" \
+  -H "Content-Type: application/json" \
+  -H "x-tenant-id: demo-tenant" \
+  -d '{
+    "incident_summary": "Auth p95 latency rose from 210ms to 1.8s and DB connections reached 99%.",
+    "candidate_count": 3
+  }'
+```
+
+---
+
+## Training Pipeline
+
+The full model workflow follows:
+
+1. **SFT (QLoRA)** on causal SRE examples
+2. **Reward Modeling** for preference signal
+3. **RLHF** for policy refinement
+
+Run sequence:
+
+```bash
+python scripts/01_generate_dataset.py
+python scripts/02_run_sft.py
+python scripts/03_train_reward_model.py
+python scripts/04_run_rlhf.py
+python scripts/05_run_evaluation.py
+```
+
+Production serving strategy in this repo prioritizes stable SFT path (`checkpoint-1064`) with verifier + safety plane, while RLHF remains an optional research track.
+
+---
+
+## Security and Safety Controls
+
+- tenant header enforcement (`x-tenant-id`) for API calls
+- optional API key auth middleware (`x-api-key`) with env toggles
+- human-in-the-loop intervention authorization endpoint
+- analysis persistence and audit trail in SQLite (`feedback/analyst_feedback.db`)
+- deterministic fallback generation when live inference is unavailable or low confidence
+
+---
+
+## Environment Variables (Important)
+
+### Body (`backend/main.py`)
+
+- `VLLM_ENDPOINT`
+- `MODEL_ID`
+- `PRODUCTION_ARTIFACT_LABEL`
+- `GROUNDING_KB_PATH`
+- `GENERATION_CANDIDATES`
+- `GENERATION_MAX_TOKENS`
+- `LIVE_ANALYSIS_TIMEOUT_SECONDS`
+- `REQUIRE_API_AUTH`
+- `API_AUTH_TOKEN`
+- `REQUIRE_TENANT_ID`
+- `ALLOWED_ORIGINS`
+- `FEEDBACK_LOG_PATH`
+- `FEEDBACK_DB_PATH`
+
+### Brain (`inference_server.py`)
+
+- `MODEL_ID`
+- `NEXUS_LORA_PATH`
+- `SERVING_BACKEND`
+- `MAX_LORA_RANK`
+- `MAX_MODEL_LEN`
+- `GPU_MEMORY_UTILIZATION`
+- `PORT`
+
+---
+
+## README Asset Regeneration
+
+If dataset/evaluation files change, regenerate charts:
+
+```bash
+python scripts/generate_readme_charts.py
+```
+
+Generated outputs:
+
+- `assets/readme/architecture_split_compute.png`
+- `assets/readme/dataset_domain_distribution.png`
+- `assets/readme/dataset_pearl_level_mix.png`
+- `assets/readme/evaluation_category_scores.png`
+- `assets/readme/evaluation_domain_scores.png`
+- `assets/readme/evaluation_quality_signals.png`
+- `assets/readme/training_runtime_profile.png`
+
+---
+
+## Current Limitations
+
+- telemetry source defaults to static snapshot when live source is unavailable
+- no full enterprise RBAC/SSO flow yet
+- evaluation outcomes are highly sensitive to strict schema settings and prompt strategy
+- RLHF path can underperform without careful reward-data alignment and checkpoint selection
 
 ---
 
