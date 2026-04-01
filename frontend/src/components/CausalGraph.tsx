@@ -1,25 +1,21 @@
 "use client";
 
-import { useMemo, useCallback } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import {
-  ReactFlow,
   Background,
   Controls,
-  MiniMap,
-  useNodesState,
-  useEdgesState,
-  type Node,
-  type Edge,
-  type NodeTypes,
   Handle,
+  MiniMap,
   Position,
+  ReactFlow,
+  type Edge,
+  type Node,
+  type NodeTypes,
+  useEdgesState,
+  useNodesState,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import dagre from "dagre";
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Types
-// ─────────────────────────────────────────────────────────────────────────────
 
 interface DAGNodeData {
   id: string;
@@ -38,33 +34,22 @@ interface CausalGraphProps {
   edges: DAGEdgeData[];
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Custom Node Component
-// ─────────────────────────────────────────────────────────────────────────────
-
 function CausalNode({ data }: { data: { label: string } }) {
   return (
-    <div className="relative group">
+    <div className="group relative">
       <Handle
         type="target"
         position={Position.Top}
-        className="!bg-blue-500 !border-blue-400 !w-2.5 !h-2.5"
+        className="!h-2.5 !w-2.5 !border-[#0f766e] !bg-[#0f766e]"
       />
-      <div
-        className="px-5 py-3 rounded-xl bg-gradient-to-br from-[#1a2740] to-[#0f1a2e]
-                    border border-blue-500/30 text-sm font-medium text-blue-100
-                    shadow-lg shadow-blue-500/10 min-w-[160px] text-center
-                    group-hover:border-blue-400/60 group-hover:shadow-blue-500/25
-                    transition-all duration-300 cursor-default"
-      >
-        <span className="relative z-10">{data.label}</span>
-        {/* Subtle inner glow */}
-        <div className="absolute inset-0 rounded-xl bg-gradient-to-t from-blue-500/5 to-transparent" />
+      <div className="min-w-[175px] cursor-default rounded-2xl border border-[#0f766e]/35 bg-gradient-to-br from-[#fefcf7] to-[#f3ede1] px-5 py-3 text-center shadow-md shadow-[#1f2a36]/10 transition-all duration-300 group-hover:border-[#0f766e]/55 group-hover:shadow-lg group-hover:shadow-[#1f2a36]/15">
+        <span className="text-sm font-semibold text-[#1f2a36]">{data.label}</span>
+        <div className="pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-t from-[#0f766e]/5 to-transparent" />
       </div>
       <Handle
         type="source"
         position={Position.Bottom}
-        className="!bg-blue-500 !border-blue-400 !w-2.5 !h-2.5"
+        className="!h-2.5 !w-2.5 !border-[#0f766e] !bg-[#0f766e]"
       />
     </div>
   );
@@ -74,43 +59,36 @@ const nodeTypes: NodeTypes = {
   causal: CausalNode,
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Dagre Layout Engine
-// ─────────────────────────────────────────────────────────────────────────────
-
-const NODE_WIDTH = 200;
-const NODE_HEIGHT = 60;
+const NODE_WIDTH = 210;
+const NODE_HEIGHT = 70;
 
 function getLayoutedElements(
   nodes: Node[],
   edges: Edge[],
   direction: "TB" | "LR" = "TB"
 ): { nodes: Node[]; edges: Edge[] } {
-  const g = new dagre.graphlib.Graph();
-  g.setDefaultEdgeLabel(() => ({}));
-
-  g.setGraph({
+  const graph = new dagre.graphlib.Graph();
+  graph.setDefaultEdgeLabel(() => ({}));
+  graph.setGraph({
     rankdir: direction,
-    ranksep: 80,
-    nodesep: 60,
-    marginx: 30,
-    marginy: 30,
+    ranksep: 92,
+    nodesep: 72,
+    marginx: 32,
+    marginy: 28,
   });
 
   nodes.forEach((node) => {
-    g.setNode(node.id, { width: NODE_WIDTH, height: NODE_HEIGHT });
+    graph.setNode(node.id, { width: NODE_WIDTH, height: NODE_HEIGHT });
   });
 
   edges.forEach((edge) => {
-    g.setEdge(edge.source, edge.target);
+    graph.setEdge(edge.source, edge.target);
   });
 
-  dagre.layout(g);
+  dagre.layout(graph);
 
-  // Convert Dagre coordinates → React Flow coordinates
-  // Dagre returns center-point coordinates; React Flow uses top-left
   const layoutedNodes = nodes.map((node) => {
-    const dagreNode = g.node(node.id);
+    const dagreNode = graph.node(node.id);
     return {
       ...node,
       position: {
@@ -123,32 +101,29 @@ function getLayoutedElements(
   return { nodes: layoutedNodes, edges };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Component
-// ─────────────────────────────────────────────────────────────────────────────
-
 export default function CausalGraph({ nodes: rawNodes, edges: rawEdges }: CausalGraphProps) {
-  // Transform API data → React Flow format
   const initialData = useMemo(() => {
-    const rfNodes: Node[] = rawNodes.map((n) => ({
-      id: n.id,
+    const rfNodes: Node[] = rawNodes.map((node) => ({
+      id: node.id,
       type: "causal",
-      data: { label: n.label },
-      position: { x: 0, y: 0 }, // will be overridden by Dagre
+      data: { label: node.label },
+      position: { x: 0, y: 0 },
+      draggable: false,
+      selectable: false,
     }));
 
-    const rfEdges: Edge[] = rawEdges.map((e) => ({
-      id: e.id,
-      source: e.source,
-      target: e.target,
-      animated: e.animated,
+    const rfEdges: Edge[] = rawEdges.map((edge) => ({
+      id: edge.id,
+      source: edge.source,
+      target: edge.target,
+      animated: edge.animated,
       style: {
-        stroke: "#3b82f6",
+        stroke: "#0f766e",
         strokeWidth: 2,
       },
       markerEnd: {
         type: "arrowclosed" as const,
-        color: "#3b82f6",
+        color: "#0f766e",
         width: 20,
         height: 20,
       },
@@ -160,38 +135,34 @@ export default function CausalGraph({ nodes: rawNodes, edges: rawEdges }: Causal
   const [nodes, setNodes, onNodesChange] = useNodesState(initialData.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialData.edges);
 
+  useEffect(() => {
+    setNodes(initialData.nodes);
+    setEdges(initialData.edges);
+  }, [initialData, setEdges, setNodes]);
+
   const onLayout = useCallback(
     (direction: "TB" | "LR") => {
-      const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
-        nodes,
-        edges,
-        direction
-      );
-      setNodes([...layoutedNodes]);
-      setEdges([...layoutedEdges]);
+      const { nodes: nextNodes, edges: nextEdges } = getLayoutedElements(nodes, edges, direction);
+      setNodes(nextNodes);
+      setEdges(nextEdges);
     },
-    [nodes, edges, setNodes, setEdges]
+    [edges, nodes, setEdges, setNodes]
   );
 
   return (
-    <div className="w-full h-full relative">
-      {/* Layout toggle */}
-      <div className="absolute top-3 right-3 z-10 flex gap-1.5">
+    <div className="relative h-full w-full">
+      <div className="absolute right-3 top-3 z-10 flex gap-1.5">
         <button
           onClick={() => onLayout("TB")}
-          className="px-2.5 py-1 text-[10px] font-mono rounded-md
-                     bg-nidaan-card border border-nidaan-border text-nidaan-text-dim
-                     hover:bg-nidaan-surface hover:text-white transition-all"
+          className="rounded-md border border-nidaan-border bg-white px-2.5 py-1 nidaan-mono text-[10px] text-nidaan-muted transition hover:border-nidaan-accent/35 hover:text-nidaan-accent-strong"
         >
-          ↕ Vertical
+          Vertical
         </button>
         <button
           onClick={() => onLayout("LR")}
-          className="px-2.5 py-1 text-[10px] font-mono rounded-md
-                     bg-nidaan-card border border-nidaan-border text-nidaan-text-dim
-                     hover:bg-nidaan-surface hover:text-white transition-all"
+          className="rounded-md border border-nidaan-border bg-white px-2.5 py-1 nidaan-mono text-[10px] text-nidaan-muted transition hover:border-nidaan-accent/35 hover:text-nidaan-accent-strong"
         >
-          ↔ Horizontal
+          Horizontal
         </button>
       </div>
 
@@ -202,22 +173,18 @@ export default function CausalGraph({ nodes: rawNodes, edges: rawEdges }: Causal
         onEdgesChange={onEdgesChange}
         nodeTypes={nodeTypes}
         fitView
-        fitViewOptions={{ padding: 0.3 }}
-        minZoom={0.3}
-        maxZoom={1.5}
+        fitViewOptions={{ padding: 0.35 }}
+        minZoom={0.35}
+        maxZoom={1.6}
         attributionPosition="bottom-left"
         proOptions={{ hideAttribution: true }}
-        className="bg-transparent"
       >
-        <Background color="#1e293b" gap={20} size={1} />
-        <Controls
-          position="bottom-right"
-          showInteractive={false}
-        />
+        <Background color="#ddd6c8" gap={22} size={1} />
+        <Controls position="bottom-right" showInteractive={false} />
         <MiniMap
           position="bottom-left"
-          nodeColor="#3b82f6"
-          maskColor="rgba(10, 14, 26, 0.8)"
+          nodeColor="#0f766e"
+          maskColor="rgba(245, 240, 230, 0.75)"
           pannable
           zoomable
         />
