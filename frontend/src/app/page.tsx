@@ -174,6 +174,70 @@ function shortTimestamp(value: string): string {
   }).format(new Date(parsed));
 }
 
+function buildLocalFallbackResult(
+  incidentSummary: string,
+  telemetrySnapshot: Record<string, Record<string, string | number>>
+): IncidentResult {
+  const nowIso = new Date().toISOString();
+  return {
+    analysis_id: `local-${Date.now()}`,
+    analysis: {
+      root_cause:
+        "Database connection pool saturation amplified by upstream auth retry pressure under frontend 503 load.",
+      intervention_simulation:
+        "Scaling auth-service directly can increase connection churn and worsen lock contention at the database layer.",
+      recommended_action:
+        "Throttle retries, apply circuit breaking on auth upstream calls, drain lock-heavy sessions, and require human approval before capacity changes.",
+      dag_nodes: [
+        { id: "frontend_503", label: "Frontend 503 Spike" },
+        { id: "auth_retry", label: "Auth Retry Storm" },
+        { id: "db_pool", label: "DB Pool Saturation" },
+        { id: "user_impact", label: "Customer Login Failure" },
+      ],
+      dag_edges: [
+        { id: "e1", source: "frontend_503", target: "auth_retry", animated: true },
+        { id: "e2", source: "auth_retry", target: "db_pool", animated: true },
+        { id: "e3", source: "db_pool", target: "user_impact", animated: true },
+      ],
+    },
+    grounding_evidence: [
+      {
+        id: "local-doc-1",
+        kind: "doc",
+        title: "Fallback Runbook Context",
+        summary:
+          "Using deterministic fallback due temporary inference outage. Validate with live backend once available.",
+        matched_terms: ["retry", "db", "503"],
+        score: 0.7,
+      },
+    ],
+    verifier: {
+      accepted: true,
+      score: 0.66,
+      evidence_overlap: 2,
+      telemetry_overlap: 3,
+      generic_penalty: 0.0,
+      panic_scaling_penalty: 0.0,
+      reasons: ["local fallback generated to keep operator workflow available"],
+    },
+    generation_metadata: {
+      artifact_label: "ui-fallback",
+      source: "local-ui-fallback",
+      model_id: "unavailable",
+      llm_reachable: false,
+      candidate_count: 1,
+      selected_candidate_index: -1,
+      used_fallback: true,
+      knowledge_base_path: "unavailable",
+    },
+    requires_human_approval: true,
+    safety_plane: "read-only-copilot",
+    telemetry_snapshot: telemetrySnapshot,
+    refutation_status: "pending",
+    timestamp: nowIso,
+  };
+}
+
 export default function DashboardPage() {
   const API_BASE = "/api";
   const BODY_BASE = "/body";
@@ -302,12 +366,18 @@ export default function DashboardPage() {
       void pollRefutation();
     } catch (err) {
       console.error(err);
+      const fallback = buildLocalFallbackResult(
+        incidentSummary,
+        telemetry ?? STATIC_TELEMETRY
+      );
+      setResult(fallback);
+      setTelemetry(fallback.telemetry_snapshot);
       setStatusTone("error");
-      setStatusMessage("Analysis failed. Check backend logs and retry.");
+      setStatusMessage("Live inference failed. Showing deterministic fallback analysis.");
     } finally {
       setLoading(false);
     }
-  }, [API_BASE, candidateCount, incidentSummary, pollRefutation]);
+  }, [API_BASE, candidateCount, incidentSummary, pollRefutation, telemetry]);
 
   const submitFeedback = useCallback(
     async (rating: "useful" | "needs_correction") => {
