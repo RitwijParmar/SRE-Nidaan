@@ -96,6 +96,24 @@ interface IntegrationCheck {
   checked_at: string;
 }
 
+interface IntegrationSnapshot {
+  status: string;
+  service: string;
+  checked_at: string;
+  services: {
+    face: string;
+    body: string;
+    telemetry_api: string;
+    brain: string;
+  };
+  endpoints: {
+    body_health: string;
+    telemetry_api: string;
+    brain_health: string;
+  };
+  notes: string[];
+}
+
 const STATIC_TELEMETRY: Record<string, Record<string, string | number>> = {
   frontend: { status: "503 Gateway Timeout", error_rate: "Spiking" },
   auth_service: { cpu_utilization: "96%", latency_ms: 4500, replicas: 5 },
@@ -193,6 +211,34 @@ function shortTimestamp(value: string): string {
   }).format(new Date(parsed));
 }
 
+function normalizeOnlineState(value: string | undefined, fallback: "online" | "offline" = "offline"): "online" | "offline" {
+  if (!value) {
+    return fallback;
+  }
+  const compact = value.toLowerCase();
+  return compact.includes("online") || compact.includes("browser-origin") ? "online" : "offline";
+}
+
+function normalizeBrainState(value: string | undefined): IntegrationCheck["brain"] {
+  if (!value) {
+    return "unknown";
+  }
+  const compact = value.toLowerCase();
+  if (compact.includes("ready")) {
+    return "ready";
+  }
+  if (compact.includes("warming")) {
+    return "warming";
+  }
+  if (compact.includes("online")) {
+    return "ready";
+  }
+  if (compact.includes("error") || compact.includes("offline") || compact.includes("fail")) {
+    return "error";
+  }
+  return "unknown";
+}
+
 function toBrainHealthUrl(vllmEndpoint: string): string {
   return vllmEndpoint.replace(/\/v1\/?$/, "/health");
 }
@@ -281,6 +327,7 @@ export default function DashboardPage() {
   const [statusTone, setStatusTone] = useState<"info" | "success" | "error">("info");
   const [refutation, setRefutation] = useState<Record<string, unknown> | null>(null);
   const [integrationCheck, setIntegrationCheck] = useState<IntegrationCheck | null>(null);
+  const [integrationSnapshot, setIntegrationSnapshot] = useState<IntegrationSnapshot | null>(null);
   const [checkingIntegration, setCheckingIntegration] = useState(false);
   const [integrationCheckMessage, setIntegrationCheckMessage] = useState<string | null>(null);
 
@@ -290,6 +337,7 @@ export default function DashboardPage() {
       { label: "Body API Docs", href: `${BODY_BASE}/docs`, hint: "Try requests live with OpenAPI UI" },
       { label: "Analyze Endpoint", href: `${BODY_BASE}/docs#/default/analyze_incident_api_analyze_incident_post`, hint: "Primary inference entrypoint" },
       { label: "Telemetry Feed", href: `${API_BASE}/telemetry`, hint: "Current incident telemetry payload" },
+      { label: "Integration Diagnostics", href: `${API_BASE}/integration-check`, hint: "Unified face-body-brain integration status" },
       { label: "Feedback Sink", href: `${BODY_BASE}/docs#/default/analysis_feedback_api_analysis_feedback_post`, hint: "Analyst rating submission endpoint" },
     ],
     [API_BASE, BODY_BASE]
@@ -297,53 +345,106 @@ export default function DashboardPage() {
 
   const telemetryView = result?.telemetry_snapshot ?? telemetry ?? STATIC_TELEMETRY;
 
+  const refreshRuntime = useCallback(async (): Promise<HealthPayload> => {
+    const [healthRes, telemetryRes] = await Promise.all([
+      fetch(`${BODY_BASE}/health`),
+      fetch(`${API_BASE}/telemetry`),
+    ]);
+
+    if (!healthRes.ok) {
+      throw new Error(`health check failed (${healthRes.status})`);
+    }
+
+    const healthPayload: HealthPayload = await healthRes.json();
+    const telemetryPayload = telemetryRes.ok
+      ? ((await telemetryRes.json()) as Record<string, Record<string, string | number>>)
+      : null;
+
+    let brainPayload: BrainHealthPayload | null = null;
+    try {
+      const brainHealthResponse = await fetch(toBrainHealthUrl(healthPayload.vllm_endpoint));
+      if (brainHealthResponse.ok) {
+        brainPayload = (await brainHealthResponse.json()) as BrainHealthPayload;
+      }
+    } catch {
+      // Best effort only.
+    }
+
+    setHealth(healthPayload);
+    setBrainHealth(brainPayload);
+    setTelemetry(telemetryPayload);
+    setCandidateCount(Math.max(1, Math.min(8, healthPayload.default_candidate_count || 3)));
+    setStatusTone("success");
+    setStatusMessage("Runtime connected. Pick a scenario and run causal analysis.");
+    return healthPayload;
+  }, [API_BASE, BODY_BASE]);
+
   const runIntegrationCheck = useCallback(
     async (seedHealth: HealthPayload | null) => {
       setCheckingIntegration(true);
       setIntegrationCheckMessage("Running integration check...");
-      const sourceHealth = seedHealth;
-      const brainHealthUrl = sourceHealth ? toBrainHealthUrl(sourceHealth.vllm_endpoint) : null;
 
       try {
-        const [bodyRes, telemetryRes, brainRes] = await Promise.all([
-          fetch(`${BODY_BASE}/health`),
+        const sourceHealth = seedHealth ?? health ?? (await refreshRuntime());
+        const [integrationRes, telemetryRes] = await Promise.all([
+          fetch(`${API_BASE}/integration-check`),
           fetch(`${API_BASE}/telemetry`),
-          brainHealthUrl ? fetch(brainHealthUrl) : Promise.resolve(null),
         ]);
 
-        let brainStatus: IntegrationCheck["brain"] = "unknown";
-        if (brainRes) {
-          if (brainRes.ok) {
-            const payload = (await brainRes.json()) as BrainHealthPayload;
-            setBrainHealth(payload);
-            if (payload.status === "ready") {
-              brainStatus = "ready";
-            } else if (payload.status === "warming") {
-              brainStatus = "warming";
-            } else {
-              brainStatus = "error";
-            }
-          } else {
-            brainStatus = "error";
-          }
+        if (telemetryRes.ok) {
+          setTelemetry((await telemetryRes.json()) as Record<string, Record<string, string | number>>);
         }
 
-        const bodyStatus: IntegrationCheck["body"] = bodyRes.ok ? "online" : "offline";
-        const telemetryStatus: IntegrationCheck["telemetry"] = telemetryRes.ok ? "online" : "offline";
-        const checkedAt = new Date().toISOString();
+        let brainPayload: BrainHealthPayload | null = null;
+        try {
+          const brainRes = await fetch(toBrainHealthUrl(sourceHealth.vllm_endpoint));
+          if (brainRes.ok) {
+            brainPayload = (await brainRes.json()) as BrainHealthPayload;
+            setBrainHealth(brainPayload);
+          }
+        } catch {
+          // Best effort only.
+        }
+
+        let faceStatus: IntegrationCheck["face"] = "online";
+        let bodyStatus: IntegrationCheck["body"] = "online";
+        let telemetryStatus: IntegrationCheck["telemetry"] = telemetryRes.ok ? "online" : "offline";
+        let brainStatus: IntegrationCheck["brain"] = normalizeBrainState(brainPayload?.status);
+        let checkedAt = new Date().toISOString();
+
+        if (integrationRes.ok) {
+          const integrationPayload = (await integrationRes.json()) as IntegrationSnapshot;
+          setIntegrationSnapshot(integrationPayload);
+          checkedAt = integrationPayload.checked_at || checkedAt;
+          faceStatus = normalizeOnlineState(integrationPayload.services?.face, "online");
+          bodyStatus = normalizeOnlineState(integrationPayload.services?.body, "online");
+          telemetryStatus = normalizeOnlineState(
+            integrationPayload.services?.telemetry_api,
+            telemetryStatus
+          );
+          brainStatus = normalizeBrainState(
+            integrationPayload.services?.brain || brainPayload?.status
+          );
+          setIntegrationCheckMessage(
+            `Integration ${integrationPayload.status} · checked ${shortTimestamp(checkedAt)} · brain ${brainStatus}.`
+          );
+        } else {
+          setIntegrationSnapshot(null);
+          setIntegrationCheckMessage(
+            `Checked ${shortTimestamp(checkedAt)} · diagnostics endpoint unavailable (${integrationRes.status}).`
+          );
+        }
 
         setIntegrationCheck({
-          face: "online",
+          face: faceStatus,
           body: bodyStatus,
           telemetry: telemetryStatus,
           brain: brainStatus,
           checked_at: checkedAt,
         });
-        setIntegrationCheckMessage(
-          `Checked ${shortTimestamp(checkedAt)} · body ${bodyStatus} · telemetry ${telemetryStatus} · brain ${brainStatus}.`
-        );
       } catch {
         const checkedAt = new Date().toISOString();
+        setIntegrationSnapshot(null);
         setIntegrationCheck({
           face: "online",
           body: "offline",
@@ -358,7 +459,7 @@ export default function DashboardPage() {
         setCheckingIntegration(false);
       }
     },
-    [API_BASE, BODY_BASE]
+    [API_BASE, health, refreshRuntime]
   );
 
   useEffect(() => {
@@ -366,37 +467,8 @@ export default function DashboardPage() {
 
     async function bootstrap() {
       try {
-        const [healthRes, telemetryRes] = await Promise.all([
-          fetch(`${BODY_BASE}/health`),
-          fetch(`${API_BASE}/telemetry`),
-        ]);
-
-        if (!healthRes.ok) {
-          throw new Error(`health check failed (${healthRes.status})`);
-        }
-
-        const healthPayload: HealthPayload = await healthRes.json();
-        const telemetryPayload = telemetryRes.ok
-          ? ((await telemetryRes.json()) as Record<string, Record<string, string | number>>)
-          : null;
-
-        let brainPayload: BrainHealthPayload | null = null;
-        try {
-          const brainHealthResponse = await fetch(toBrainHealthUrl(healthPayload.vllm_endpoint));
-          if (brainHealthResponse.ok) {
-            brainPayload = (await brainHealthResponse.json()) as BrainHealthPayload;
-          }
-        } catch {
-          // Best effort only.
-        }
-
+        const healthPayload = await refreshRuntime();
         if (!disposed) {
-          setHealth(healthPayload);
-          setBrainHealth(brainPayload);
-          setTelemetry(telemetryPayload);
-          setCandidateCount(Math.max(1, Math.min(8, healthPayload.default_candidate_count || 3)));
-          setStatusTone("success");
-          setStatusMessage("Runtime connected. Pick a scenario and run causal analysis.");
           void runIntegrationCheck(healthPayload);
         }
       } catch (err) {
@@ -413,7 +485,7 @@ export default function DashboardPage() {
     return () => {
       disposed = true;
     };
-  }, [API_BASE, BODY_BASE, runIntegrationCheck]);
+  }, [refreshRuntime, runIntegrationCheck]);
 
   const pollRefutation = useCallback(async () => {
     for (let attempt = 0; attempt < 6; attempt += 1) {
@@ -560,24 +632,29 @@ export default function DashboardPage() {
             >
               {loading ? "Analyzing..." : "Analyze Incident"}
             </button>
-            <a
-              href={`${BODY_BASE}/health`}
+            <button
+              onClick={() => {
+                void refreshRuntime();
+              }}
               className="rounded-full border border-nidaan-border bg-white px-4 py-2 text-sm font-medium text-nidaan-ink transition hover:border-nidaan-accent/40 hover:text-nidaan-accent"
             >
-              Runtime Health
-            </a>
+              Refresh Runtime
+            </button>
             <a
               href={`${BODY_BASE}/docs`}
               className="rounded-full border border-nidaan-border bg-white px-4 py-2 text-sm font-medium text-nidaan-ink transition hover:border-nidaan-accent/40 hover:text-nidaan-accent"
             >
               API Docs
             </a>
-            <a
-              href={`${BODY_BASE}/api/integration-check`}
-              className="rounded-full border border-nidaan-border bg-white px-4 py-2 text-sm font-medium text-nidaan-ink transition hover:border-nidaan-accent/40 hover:text-nidaan-accent"
+            <button
+              onClick={() => {
+                void runIntegrationCheck(health);
+              }}
+              disabled={checkingIntegration}
+              className="rounded-full border border-nidaan-border bg-white px-4 py-2 text-sm font-medium text-nidaan-ink transition hover:border-nidaan-accent/40 hover:text-nidaan-accent disabled:cursor-not-allowed disabled:opacity-60"
             >
-              Integration Check
-            </a>
+              {checkingIntegration ? "Checking..." : "Integration Check"}
+            </button>
           </div>
           {integrationCheckMessage && (
             <p className="nidaan-mono text-[11px] text-nidaan-muted lg:text-right">
@@ -685,6 +762,32 @@ export default function DashboardPage() {
                 </div>
               </div>
             )}
+
+            {brainHealth && (
+              <div className="mt-3 rounded-2xl border border-nidaan-border bg-white p-3">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <p className="nidaan-mono text-[10px] uppercase tracking-wider text-nidaan-muted">brain runtime</p>
+                  <span className={`rounded-full border px-2 py-0.5 nidaan-mono text-[10px] uppercase ${
+                    brainHealth.status === "ready"
+                      ? "border-nidaan-success/30 bg-nidaan-success/10 text-nidaan-success"
+                      : brainHealth.status === "warming"
+                        ? "border-nidaan-warning/30 bg-nidaan-warning/10 text-nidaan-warning"
+                        : "border-nidaan-danger/30 bg-nidaan-danger/10 text-nidaan-danger"
+                  }`}>
+                    {brainHealth.status}
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <p className="text-xs text-nidaan-ink"><span className="nidaan-mono text-nidaan-muted">backend:</span> {brainHealth.serving_backend}</p>
+                  <p className="text-xs text-nidaan-ink"><span className="nidaan-mono text-nidaan-muted">engine loaded:</span> {String(brainHealth.engine_loaded)}</p>
+                  <p className="break-all text-xs text-nidaan-ink"><span className="nidaan-mono text-nidaan-muted">base model:</span> {brainHealth.base_model}</p>
+                  <p className="break-all text-xs text-nidaan-ink"><span className="nidaan-mono text-nidaan-muted">adapter:</span> {brainHealth.lora_adapter}</p>
+                </div>
+                {brainHealth.engine_error && (
+                  <p className="mt-2 text-xs text-nidaan-danger">{brainHealth.engine_error}</p>
+                )}
+              </div>
+            )}
           </article>
 
           <article className="nidaan-card p-5">
@@ -748,6 +851,36 @@ export default function DashboardPage() {
                 </p>
               )}
             </div>
+
+            {integrationSnapshot && (
+              <div className="mt-3 rounded-xl border border-nidaan-border bg-white p-3">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <p className="nidaan-mono text-[10px] uppercase tracking-wider text-nidaan-muted">diagnostics snapshot</p>
+                  <span className={`rounded-full border px-2 py-0.5 nidaan-mono text-[10px] uppercase ${
+                    integrationSnapshot.status === "ok"
+                      ? "border-nidaan-success/30 bg-nidaan-success/10 text-nidaan-success"
+                      : "border-nidaan-warning/30 bg-nidaan-warning/10 text-nidaan-warning"
+                  }`}>
+                    {integrationSnapshot.status}
+                  </span>
+                </div>
+                <p className="text-xs text-nidaan-ink">
+                  <span className="nidaan-mono text-nidaan-muted">checked:</span> {shortTimestamp(integrationSnapshot.checked_at)}
+                </p>
+                <p className="mt-1 break-all text-xs text-nidaan-ink">
+                  <span className="nidaan-mono text-nidaan-muted">body health:</span> {integrationSnapshot.endpoints.body_health}
+                </p>
+                <p className="mt-1 break-all text-xs text-nidaan-ink">
+                  <span className="nidaan-mono text-nidaan-muted">telemetry api:</span> {integrationSnapshot.endpoints.telemetry_api}
+                </p>
+                <p className="mt-1 break-all text-xs text-nidaan-ink">
+                  <span className="nidaan-mono text-nidaan-muted">brain health:</span> {integrationSnapshot.endpoints.brain_health}
+                </p>
+                {integrationSnapshot.notes.length > 0 && (
+                  <p className="mt-2 text-xs text-nidaan-muted">{integrationSnapshot.notes.join(" · ")}</p>
+                )}
+              </div>
+            )}
           </article>
 
           <article className="nidaan-card p-5">
