@@ -175,7 +175,8 @@ function shortTimestamp(value: string): string {
 }
 
 export default function DashboardPage() {
-  const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
+  const API_BASE = "/api";
+  const BODY_BASE = "/body";
   const [result, setResult] = useState<IncidentResult | null>(null);
   const [health, setHealth] = useState<HealthPayload | null>(null);
   const [telemetry, setTelemetry] = useState<Record<string, Record<string, string | number>> | null>(null);
@@ -193,13 +194,13 @@ export default function DashboardPage() {
 
   const serviceLinks = useMemo(
     () => [
-      { label: "Body Health", href: `${API_BASE}/health`, hint: "Runtime health and model metadata" },
-      { label: "Body API Docs", href: `${API_BASE}/docs`, hint: "Try requests live with OpenAPI UI" },
-      { label: "Analyze Endpoint", href: `${API_BASE}/docs#/default/analyze_incident_api_analyze_incident_post`, hint: "Primary inference entrypoint" },
-      { label: "Telemetry Feed", href: `${API_BASE}/api/telemetry`, hint: "Current incident telemetry payload" },
-      { label: "Feedback Sink", href: `${API_BASE}/docs#/default/analysis_feedback_api_analysis_feedback_post`, hint: "Analyst rating submission endpoint" },
+      { label: "Body Health", href: `${BODY_BASE}/health`, hint: "Runtime health and model metadata" },
+      { label: "Body API Docs", href: `${BODY_BASE}/docs`, hint: "Try requests live with OpenAPI UI" },
+      { label: "Analyze Endpoint", href: `${BODY_BASE}/docs#/default/analyze_incident_api_analyze_incident_post`, hint: "Primary inference entrypoint" },
+      { label: "Telemetry Feed", href: `${API_BASE}/telemetry`, hint: "Current incident telemetry payload" },
+      { label: "Feedback Sink", href: `${BODY_BASE}/docs#/default/analysis_feedback_api_analysis_feedback_post`, hint: "Analyst rating submission endpoint" },
     ],
-    [API_BASE]
+    [API_BASE, BODY_BASE]
   );
 
   const telemetryView = result?.telemetry_snapshot ?? telemetry ?? STATIC_TELEMETRY;
@@ -210,8 +211,8 @@ export default function DashboardPage() {
     async function bootstrap() {
       try {
         const [healthRes, telemetryRes] = await Promise.all([
-          fetch(`${API_BASE}/health`),
-          fetch(`${API_BASE}/api/telemetry`),
+          fetch(`${BODY_BASE}/health`),
+          fetch(`${API_BASE}/telemetry`),
         ]);
 
         if (!healthRes.ok) {
@@ -244,7 +245,7 @@ export default function DashboardPage() {
     return () => {
       disposed = true;
     };
-  }, [API_BASE]);
+  }, [API_BASE, BODY_BASE]);
 
   const pollRefutation = useCallback(async () => {
     for (let attempt = 0; attempt < 6; attempt += 1) {
@@ -252,7 +253,7 @@ export default function DashboardPage() {
         window.setTimeout(resolve, 1200);
       });
       try {
-        const response = await fetch(`${API_BASE}/api/refutation-result`);
+        const response = await fetch(`${API_BASE}/refutation-result`);
         if (!response.ok) {
           continue;
         }
@@ -276,7 +277,7 @@ export default function DashboardPage() {
     setStatusMessage("Running grounded causal analysis...");
 
     try {
-      const response = await fetch(`${API_BASE}/api/analyze-incident`, {
+      const response = await fetch(`${API_BASE}/analyze-incident`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -316,7 +317,7 @@ export default function DashboardPage() {
       setFeedbackSubmitting(true);
       setFeedbackStatus(null);
       try {
-        const response = await fetch(`${API_BASE}/api/analysis-feedback`, {
+        const response = await fetch(`${API_BASE}/analysis-feedback`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -386,7 +387,7 @@ export default function DashboardPage() {
               {loading ? "Analyzing..." : "Analyze Incident"}
             </button>
             <a
-              href={`${API_BASE}/health`}
+              href={`${BODY_BASE}/health`}
               target="_blank"
               rel="noopener noreferrer"
               className="rounded-full border border-nidaan-border bg-white px-4 py-2 text-sm font-medium text-nidaan-ink transition hover:border-nidaan-accent/40 hover:text-nidaan-accent"
@@ -394,7 +395,7 @@ export default function DashboardPage() {
               Runtime Health
             </a>
             <a
-              href={`${API_BASE}/docs`}
+              href={`${BODY_BASE}/docs`}
               target="_blank"
               rel="noopener noreferrer"
               className="rounded-full border border-nidaan-border bg-white px-4 py-2 text-sm font-medium text-nidaan-ink transition hover:border-nidaan-accent/40 hover:text-nidaan-accent"
