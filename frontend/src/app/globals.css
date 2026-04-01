@@ -80,8 +80,8 @@ a {
   z-index: 0;
   pointer-events: none;
   border-radius: 999px;
-  filter: blur(70px);
-  opacity: 0.55;
+  filter: blur(90px);
+  opacity: 0.34;
   transform: translateZ(0);
 }
 
@@ -133,32 +133,12 @@ a {
   letter-spacing: 0.08em;
 }
 
-@keyframes beacon {
-  0%, 100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 0.55;
-    transform: scale(0.88);
-  }
-}
-
 .animate-beacon {
-  animation: beacon 1.8s ease-in-out infinite;
-}
-
-@keyframes metricAlert {
-  0%, 100% {
-    color: #bc4938;
-  }
-  50% {
-    color: #c8791f;
-  }
+  animation: none;
 }
 
 .metric-alert {
-  animation: metricAlert 2.2s ease-in-out infinite;
+  animation: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -203,11 +183,5 @@ a {
 
 .react-flow__edge.animated .react-flow__edge-path {
   stroke-dasharray: 6;
-  animation: edgePulse 1.2s linear infinite;
-}
-
-@keyframes edgePulse {
-  to {
-    stroke-dashoffset: -12;
-  }
+  animation: none;
 }

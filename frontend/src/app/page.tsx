@@ -114,6 +114,14 @@ interface IntegrationSnapshot {
   notes: string[];
 }
 
+interface InterventionAuthorizationAck {
+  status: string;
+  authorization_id: string;
+  analysis_id: string;
+  tenant_id: string;
+  timestamp: string;
+}
+
 const STATIC_TELEMETRY: Record<string, Record<string, string | number>> = {
   frontend: { status: "503 Gateway Timeout", error_rate: "Spiking" },
   auth_service: { cpu_utilization: "96%", latency_ms: 4500, replicas: 5 },
@@ -287,99 +295,17 @@ function ensureRenderableIncidentResult(payload: IncidentResult): IncidentResult
   const nodes = payload.analysis.dag_nodes ?? [];
   const edges = payload.analysis.dag_edges ?? [];
   const nodeIds = new Set(nodes.map((node) => node.id));
-  const graphLooksRenderable =
-    nodes.length > 0 &&
-    edges.length > 0 &&
-    edges.every((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target));
-
-  if (graphLooksRenderable) {
-    return payload;
-  }
-
-  const fallbackNodes: DAGNode[] = [
-    { id: "incident", label: "Incident Symptoms" },
-    { id: "root", label: "Structural Root Cause" },
-    { id: "intervention", label: "Intervention Risk" },
-    { id: "action", label: "Recommended Action" },
-  ];
-
-  const fallbackEdges: DAGEdge[] = [
-    { id: "auto-e1", source: "incident", target: "root", animated: true },
-    { id: "auto-e2", source: "root", target: "intervention", animated: true },
-    { id: "auto-e3", source: "intervention", target: "action", animated: true },
-  ];
+  const filteredEdges = edges.filter(
+    (edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target)
+  );
 
   return {
     ...payload,
     analysis: {
       ...payload.analysis,
-      dag_nodes: fallbackNodes,
-      dag_edges: fallbackEdges,
+      dag_nodes: nodes,
+      dag_edges: filteredEdges,
     },
-  };
-}
-
-function buildLocalFallbackResult(
-  incidentSummary: string,
-  telemetrySnapshot: Record<string, Record<string, string | number>>
-): IncidentResult {
-  const nowIso = new Date().toISOString();
-  return {
-    analysis_id: `local-${Date.now()}`,
-    analysis: {
-      root_cause:
-        "Database connection pool saturation amplified by upstream auth retry pressure under frontend 503 load.",
-      intervention_simulation:
-        "Scaling auth-service directly can increase connection churn and worsen lock contention at the database layer.",
-      recommended_action:
-        "Throttle retries, apply circuit breaking on auth upstream calls, drain lock-heavy sessions, and require human approval before capacity changes.",
-      dag_nodes: [
-        { id: "frontend_503", label: "Frontend 503 Spike" },
-        { id: "auth_retry", label: "Auth Retry Storm" },
-        { id: "db_pool", label: "DB Pool Saturation" },
-        { id: "user_impact", label: "Customer Login Failure" },
-      ],
-      dag_edges: [
-        { id: "e1", source: "frontend_503", target: "auth_retry", animated: true },
-        { id: "e2", source: "auth_retry", target: "db_pool", animated: true },
-        { id: "e3", source: "db_pool", target: "user_impact", animated: true },
-      ],
-    },
-    grounding_evidence: [
-      {
-        id: "local-doc-1",
-        kind: "doc",
-        title: "Fallback Runbook Context",
-        summary:
-          "Using deterministic fallback due temporary inference outage. Validate with live backend once available.",
-        matched_terms: ["retry", "db", "503"],
-        score: 0.7,
-      },
-    ],
-    verifier: {
-      accepted: true,
-      score: 0.66,
-      evidence_overlap: 2,
-      telemetry_overlap: 3,
-      generic_penalty: 0.0,
-      panic_scaling_penalty: 0.0,
-      reasons: ["local fallback generated to keep operator workflow available"],
-    },
-    generation_metadata: {
-      artifact_label: "ui-fallback",
-      source: "local-ui-fallback",
-      model_id: "unavailable",
-      llm_reachable: false,
-      candidate_count: 1,
-      selected_candidate_index: -1,
-      used_fallback: true,
-      knowledge_base_path: "unavailable",
-    },
-    requires_human_approval: true,
-    safety_plane: "read-only-copilot",
-    telemetry_snapshot: telemetrySnapshot,
-    refutation_status: "pending",
-    timestamp: nowIso,
   };
 }
 
@@ -388,6 +314,7 @@ export default function DashboardPage() {
   const BODY_BASE = configuredBodyBase || "/body";
   const API_BASE = "/api";
   const DIRECT_API_BASE = configuredBodyBase ? `${configuredBodyBase}/api` : API_BASE;
+  const TENANT_ID = (process.env.NEXT_PUBLIC_TENANT_ID || "default-tenant").trim();
   const [result, setResult] = useState<IncidentResult | null>(null);
   const [health, setHealth] = useState<HealthPayload | null>(null);
   const [brainHealth, setBrainHealth] = useState<BrainHealthPayload | null>(null);
@@ -395,7 +322,12 @@ export default function DashboardPage() {
   const [incidentSummary, setIncidentSummary] = useState(INCIDENT_PRESETS[0].summary);
   const [selectedPreset, setSelectedPreset] = useState(INCIDENT_PRESETS[0].id);
   const [candidateCount, setCandidateCount] = useState(3);
+  const [expertMode, setExpertMode] = useState(false);
   const [authorized, setAuthorized] = useState(false);
+  const [authorizationSubmitting, setAuthorizationSubmitting] = useState(false);
+  const [authorizationStatus, setAuthorizationStatus] = useState<string | null>(null);
+  const [authorizationReason, setAuthorizationReason] = useState("");
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [refreshingRuntime, setRefreshingRuntime] = useState(false);
   const [analysisStage, setAnalysisStage] = useState<string | null>(null);
@@ -414,23 +346,20 @@ export default function DashboardPage() {
   const latestHealthRef = useRef<HealthPayload | null>(null);
   const didBootstrapRef = useRef(false);
 
-  const serviceLinks = useMemo(
-    () => [
-      { label: "Runtime Pulse Panel", href: "#runtime-pulse", hint: "Live runtime health rendered inside this UI" },
-      { label: "Integration Panel", href: "#system-integration", hint: "Face-body-brain status rendered in dashboard cards" },
-      { label: "Causal Graph Workspace", href: "#causal-graph-workspace", hint: "Main DAG canvas and analysis timeline" },
-      { label: "Analyst Feedback Loop", href: "#analyst-feedback-loop", hint: "Submit useful/correction labels for tuning" },
-      { label: "Body API Docs", href: `${BODY_BASE}/docs`, hint: "Try requests live with OpenAPI UI" },
-      { label: "Analyze Endpoint", href: `${BODY_BASE}/docs#/default/analyze_incident_api_analyze_incident_post`, hint: "Primary inference entrypoint" },
-      { label: "Feedback Sink", href: `${BODY_BASE}/docs#/default/analysis_feedback_api_analysis_feedback_post`, hint: "Analyst rating submission endpoint" },
-    ],
-    [BODY_BASE]
-  );
-
   const telemetryView = result?.telemetry_snapshot ?? telemetry ?? STATIC_TELEMETRY;
   const graphResult = useMemo(
     () => (result ? ensureRenderableIncidentResult(result) : null),
     [result]
+  );
+  const withTenantHeaders = useCallback(
+    (headers?: HeadersInit): Headers => {
+      const merged = new Headers(headers || {});
+      if (!merged.has("x-tenant-id")) {
+        merged.set("x-tenant-id", TENANT_ID);
+      }
+      return merged;
+    },
+    [TENANT_ID]
   );
 
   const refreshRuntime = useCallback(async (): Promise<HealthPayload> => {
@@ -440,7 +369,11 @@ export default function DashboardPage() {
     try {
       const [healthRes, telemetryRes] = await Promise.all([
         fetchWithTimeout(`${BODY_BASE}/health`, {}, NETWORK_TIMEOUT_MS),
-        fetchWithTimeout(`${API_BASE}/telemetry`, {}, NETWORK_TIMEOUT_MS),
+        fetchWithTimeout(
+          `${API_BASE}/telemetry`,
+          { headers: withTenantHeaders() },
+          NETWORK_TIMEOUT_MS
+        ),
       ]);
 
       if (!healthRes.ok) {
@@ -481,7 +414,7 @@ export default function DashboardPage() {
     } finally {
       setRefreshingRuntime(false);
     }
-  }, [API_BASE, BODY_BASE]);
+  }, [API_BASE, BODY_BASE, withTenantHeaders]);
 
   const runIntegrationCheck = useCallback(
     async (seedHealth: HealthPayload | null) => {
@@ -491,8 +424,16 @@ export default function DashboardPage() {
       try {
         const sourceHealth = seedHealth ?? latestHealthRef.current ?? (await refreshRuntime());
         const [integrationRes, telemetryRes] = await Promise.all([
-          fetchWithTimeout(`${API_BASE}/integration-check`, {}, NETWORK_TIMEOUT_MS),
-          fetchWithTimeout(`${API_BASE}/telemetry`, {}, NETWORK_TIMEOUT_MS),
+          fetchWithTimeout(
+            `${API_BASE}/integration-check`,
+            { headers: withTenantHeaders() },
+            NETWORK_TIMEOUT_MS
+          ),
+          fetchWithTimeout(
+            `${API_BASE}/telemetry`,
+            { headers: withTenantHeaders() },
+            NETWORK_TIMEOUT_MS
+          ),
         ]);
 
         if (telemetryRes.ok) {
@@ -567,7 +508,7 @@ export default function DashboardPage() {
         setCheckingIntegration(false);
       }
     },
-    [API_BASE, refreshRuntime]
+    [API_BASE, refreshRuntime, withTenantHeaders]
   );
 
   useEffect(() => {
@@ -608,7 +549,7 @@ export default function DashboardPage() {
       try {
         const response = await fetchWithTimeout(
           `${API_BASE}/refutation-result`,
-          {},
+          { headers: withTenantHeaders() },
           REFUTATION_TIMEOUT_MS
         );
         if (!response.ok) {
@@ -623,7 +564,7 @@ export default function DashboardPage() {
         // Non-blocking poll.
       }
     }
-  }, [API_BASE]);
+  }, [API_BASE, withTenantHeaders]);
 
   const analyzeIncident = useCallback(async () => {
     if (loading) {
@@ -640,15 +581,18 @@ export default function DashboardPage() {
     setLoading(true);
     setAnalysisStage("Collecting telemetry and prompting the causal model...");
     setAuthorized(false);
+    setAuthorizationStatus(null);
+    setResult(null);
     setFeedbackStatus(null);
     setRefutation(null);
+    setAnalysisError(null);
     setStatusTone("info");
     setStatusMessage("Running grounded causal analysis...");
 
     try {
       const response = await fetchWithTimeout(`${DIRECT_API_BASE}/analyze-incident`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: withTenantHeaders({ "Content-Type": "application/json" }),
         signal: abortController.signal,
         body: JSON.stringify({
           incident_summary: incidentSummary,
@@ -682,22 +626,21 @@ export default function DashboardPage() {
       }
       const aborted = abortController.signal.aborted;
       const stopReason = String(abortController.signal.reason || "");
-      const fallback = ensureRenderableIncidentResult(buildLocalFallbackResult(
-        incidentSummary,
-        telemetry ?? STATIC_TELEMETRY
-      ));
-      setResult(fallback);
-      setTelemetry(fallback.telemetry_snapshot);
+      setAnalysisError(
+        aborted
+          ? "Analysis was cancelled before completion."
+          : "Live analysis failed. Review runtime diagnostics and retry."
+      );
       if (aborted) {
         setStatusTone("error");
         setStatusMessage(
           stopReason === "timeout"
-            ? "Analysis timed out. Showing deterministic fallback analysis."
-            : "Analysis stopped. Showing deterministic fallback analysis."
+            ? "Analysis timed out. No synthetic fallback shown."
+            : "Analysis stopped. No synthetic fallback shown."
         );
       } else {
         setStatusTone("error");
-        setStatusMessage("Live inference failed. Showing deterministic fallback analysis.");
+        setStatusMessage("Live inference failed. No synthetic fallback shown.");
       }
     } finally {
       window.clearTimeout(timeoutHandle);
@@ -709,13 +652,13 @@ export default function DashboardPage() {
         setAnalysisStage(null);
       }
     }
-  }, [DIRECT_API_BASE, candidateCount, incidentSummary, loading, pollRefutation, telemetry]);
+  }, [DIRECT_API_BASE, candidateCount, incidentSummary, loading, pollRefutation, withTenantHeaders]);
 
   const stopAnalysis = useCallback(() => {
     if (analysisAbortRef.current) {
       setStatusTone("info");
-      setStatusMessage("Stopping analysis and preparing safe fallback...");
-      setAnalysisStage("Stopping analysis and loading fallback...");
+      setStatusMessage("Stopping analysis request...");
+      setAnalysisStage("Cancelling in-flight request...");
       analysisAbortRef.current.abort("manual-stop");
     }
   }, []);
@@ -730,7 +673,7 @@ export default function DashboardPage() {
       try {
         const response = await fetchWithTimeout(`${DIRECT_API_BASE}/analysis-feedback`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: withTenantHeaders({ "Content-Type": "application/json" }),
           body: JSON.stringify({
             analysis_id: result.analysis_id,
             rating,
@@ -761,8 +704,60 @@ export default function DashboardPage() {
         setFeedbackSubmitting(false);
       }
     },
-    [DIRECT_API_BASE, feedbackNote, incidentSummary, result]
+    [DIRECT_API_BASE, feedbackNote, incidentSummary, result, withTenantHeaders]
   );
+
+  const authorizeIntervention = useCallback(async () => {
+    if (!result || authorizationSubmitting) {
+      return;
+    }
+    const reason = authorizationReason.trim();
+    if (reason.length < 8) {
+      setAuthorizationStatus("Provide a short approval reason (at least 8 characters).");
+      return;
+    }
+
+    setAuthorizationSubmitting(true);
+    setAuthorizationStatus(null);
+    try {
+      const response = await fetchWithTimeout(
+        `${DIRECT_API_BASE}/interventions/authorize`,
+        {
+          method: "POST",
+          headers: withTenantHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify({
+            analysis_id: result.analysis_id,
+            operator_id: "incident-commander",
+            tenant_id: TENANT_ID,
+            reason,
+            approved_action: result.analysis.recommended_action,
+          }),
+        },
+        NETWORK_TIMEOUT_MS
+      );
+      if (!response.ok) {
+        throw new Error(`authorization failed (${response.status})`);
+      }
+      const payload = (await response.json()) as InterventionAuthorizationAck;
+      setAuthorized(true);
+      setAuthorizationStatus(
+        `Authorized as ${payload.authorization_id} at ${shortTimestamp(payload.timestamp)}.`
+      );
+      setAuthorizationReason("");
+    } catch (error) {
+      console.error(error);
+      setAuthorizationStatus("Authorization failed. Check policy headers and retry.");
+    } finally {
+      setAuthorizationSubmitting(false);
+    }
+  }, [
+    DIRECT_API_BASE,
+    TENANT_ID,
+    authorizationReason,
+    authorizationSubmitting,
+    result,
+    withTenantHeaders,
+  ]);
 
   return (
     <div className="nidaan-shell min-h-screen text-nidaan-ink">
@@ -789,6 +784,12 @@ export default function DashboardPage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
+            <button
+              onClick={() => setExpertMode((value) => !value)}
+              className="rounded-full border border-nidaan-border bg-white px-4 py-2 text-sm font-medium text-nidaan-ink transition hover:border-nidaan-accent/40 hover:text-nidaan-accent"
+            >
+              {expertMode ? "Expert: On" : "Expert: Off"}
+            </button>
             <button
               id="analyze-incident-btn"
               onClick={analyzeIncident}
@@ -821,21 +822,25 @@ export default function DashboardPage() {
             >
               {refreshingRuntime || checkingIntegration ? "Refreshing..." : "Refresh Runtime"}
             </button>
-            <a
-              href={`${BODY_BASE}/docs`}
-              className="rounded-full border border-nidaan-border bg-white px-4 py-2 text-sm font-medium text-nidaan-ink transition hover:border-nidaan-accent/40 hover:text-nidaan-accent"
-            >
-              API Docs
-            </a>
-            <button
-              onClick={() => {
-                void runIntegrationCheck(health);
-              }}
-              disabled={checkingIntegration || refreshingRuntime}
-              className="rounded-full border border-nidaan-border bg-white px-4 py-2 text-sm font-medium text-nidaan-ink transition hover:border-nidaan-accent/40 hover:text-nidaan-accent disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {checkingIntegration ? "Checking..." : "Integration Check"}
-            </button>
+            {expertMode && (
+              <a
+                href={`${BODY_BASE}/docs`}
+                className="rounded-full border border-nidaan-border bg-white px-4 py-2 text-sm font-medium text-nidaan-ink transition hover:border-nidaan-accent/40 hover:text-nidaan-accent"
+              >
+                API Docs
+              </a>
+            )}
+            {expertMode && (
+              <button
+                onClick={() => {
+                  void runIntegrationCheck(health);
+                }}
+                disabled={checkingIntegration || refreshingRuntime}
+                className="rounded-full border border-nidaan-border bg-white px-4 py-2 text-sm font-medium text-nidaan-ink transition hover:border-nidaan-accent/40 hover:text-nidaan-accent disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {checkingIntegration ? "Checking..." : "Integration Check"}
+              </button>
+            )}
           </div>
           {integrationCheckMessage && (
             <p className="nidaan-mono text-[11px] text-nidaan-muted lg:text-right">
@@ -847,7 +852,7 @@ export default function DashboardPage() {
 
       <main className="mx-auto grid w-full max-w-[1600px] grid-cols-1 gap-6 px-5 py-6 lg:px-8 xl:grid-cols-12">
         <section className="space-y-5 xl:col-span-4">
-          <article id="runtime-pulse" className="nidaan-card p-5">
+          <article id="incident-command" className="nidaan-card p-5">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
               <h2 className="nidaan-display text-lg font-semibold text-nidaan-ink">Incident Command</h2>
               <span className="nidaan-chip">Human-in-the-loop enforced</span>
@@ -883,31 +888,54 @@ export default function DashboardPage() {
               placeholder="Describe blast radius, customer impact, and first observed symptoms."
             />
 
-            <div className="mt-4 rounded-2xl border border-nidaan-border bg-white/80 p-3">
-              <div className="mb-2 flex items-center justify-between">
-                <span className="text-xs font-semibold uppercase tracking-wider text-nidaan-muted">
-                  Candidate Search Depth
-                </span>
-                <span className="nidaan-mono text-xs text-nidaan-ink">{candidateCount}</span>
+            {expertMode && (
+              <div className="mt-4 rounded-2xl border border-nidaan-border bg-white/80 p-3">
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-nidaan-muted">
+                    Candidate Search Depth
+                  </span>
+                  <span className="nidaan-mono text-xs text-nidaan-ink">{candidateCount}</span>
+                </div>
+                <input
+                  type="range"
+                  min={1}
+                  max={8}
+                  step={1}
+                  value={candidateCount}
+                  onChange={(event) => {
+                    setCandidateCount(Number(event.target.value));
+                  }}
+                  className="w-full accent-[#0f766e]"
+                />
+                <p className="mt-2 text-xs text-nidaan-muted">
+                  More candidates increase diversity before verifier ranking. Recommended for demos: 3-5.
+                </p>
               </div>
-              <input
-                type="range"
-                min={1}
-                max={8}
-                step={1}
-                value={candidateCount}
-                onChange={(event) => {
-                  setCandidateCount(Number(event.target.value));
-                }}
-                className="w-full accent-[#0f766e]"
-              />
-              <p className="mt-2 text-xs text-nidaan-muted">
-                More candidates increase diversity before verifier ranking. Recommended for demos: 3-5.
+            )}
+          </article>
+
+          <article className="nidaan-card p-5">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="nidaan-display text-lg font-semibold text-nidaan-ink">Incident Workflow</h2>
+              <span className="nidaan-chip">guided</span>
+            </div>
+            <div className="space-y-2 text-sm text-nidaan-muted">
+              <p>
+                <span className="nidaan-mono text-nidaan-ink">1.</span> Describe incident blast radius and trigger analysis.
+              </p>
+              <p>
+                <span className="nidaan-mono text-nidaan-ink">2.</span> Validate root cause and graph evidence.
+              </p>
+              <p>
+                <span className="nidaan-mono text-nidaan-ink">3.</span> Authorize intervention with reason for audit.
+              </p>
+              <p>
+                <span className="nidaan-mono text-nidaan-ink">4.</span> Submit analyst feedback to improve future responses.
               </p>
             </div>
           </article>
 
-          <article id="system-integration" className="nidaan-card p-5">
+          <article id="runtime-pulse" className="nidaan-card p-5">
             <div className="mb-3 flex items-center justify-between">
               <h2 className="nidaan-display text-lg font-semibold text-nidaan-ink">Runtime Pulse</h2>
               <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-bold uppercase tracking-[0.08em] ${
@@ -917,13 +945,24 @@ export default function DashboardPage() {
                     ? "border-nidaan-danger/30 bg-nidaan-danger/10 text-nidaan-danger"
                     : "border-nidaan-accent/30 bg-nidaan-accent/10 text-nidaan-accent-strong"
               }`}>
-                <span className={`h-2 w-2 rounded-full ${statusTone === "error" ? "bg-nidaan-danger" : "animate-beacon bg-nidaan-success"}`} />
+                <span className={`h-2 w-2 rounded-full ${statusTone === "error" ? "bg-nidaan-danger" : "bg-nidaan-success"}`} />
                 {statusTone}
               </span>
             </div>
             <p className="text-sm text-nidaan-muted">{statusMessage}</p>
 
-            {health && (
+            {health && !expertMode && (
+              <div className="mt-4 rounded-2xl border border-nidaan-border bg-white p-3">
+                <p className="text-xs text-nidaan-ink">
+                  Runtime is connected with artifact <span className="nidaan-mono">{health.artifact_label}</span>.
+                </p>
+                <p className="mt-1 text-xs text-nidaan-muted">
+                  Detailed runtime metadata is available in expert mode.
+                </p>
+              </div>
+            )}
+
+            {health && expertMode && (
               <div className="mt-4 grid grid-cols-2 gap-3">
                 <div className="rounded-xl border border-nidaan-border bg-white p-3">
                   <p className="nidaan-mono text-[10px] uppercase tracking-wider text-nidaan-muted">model</p>
@@ -944,7 +983,7 @@ export default function DashboardPage() {
               </div>
             )}
 
-            {brainHealth && (
+            {brainHealth && expertMode && (
               <div className="mt-3 rounded-2xl border border-nidaan-border bg-white p-3">
                 <div className="mb-2 flex items-center justify-between gap-2">
                   <p className="nidaan-mono text-[10px] uppercase tracking-wider text-nidaan-muted">brain runtime</p>
@@ -969,9 +1008,16 @@ export default function DashboardPage() {
                 )}
               </div>
             )}
+
+            {brainHealth && !expertMode && (
+              <p className="mt-3 text-xs text-nidaan-muted">
+                Brain status: <span className="nidaan-mono text-nidaan-ink">{brainHealth.status}</span>
+              </p>
+            )}
           </article>
 
-          <article className="nidaan-card p-5">
+          {expertMode && (
+          <article id="system-integration" className="nidaan-card p-5">
             <div className="mb-3 flex items-center justify-between">
               <h2 className="nidaan-display text-lg font-semibold text-nidaan-ink">System Integration</h2>
               <span className="nidaan-chip">Face + Body + Brain</span>
@@ -1063,11 +1109,13 @@ export default function DashboardPage() {
               </div>
             )}
           </article>
+          )}
 
+          {expertMode && (
           <article className="nidaan-card p-5">
             <div className="mb-3 flex items-center justify-between">
-              <h2 className="nidaan-display text-lg font-semibold text-nidaan-ink">Live Telemetry</h2>
-              <span className="nidaan-mono text-[10px] uppercase tracking-[0.1em] text-nidaan-muted">streaming snapshot</span>
+              <h2 className="nidaan-display text-lg font-semibold text-nidaan-ink">Telemetry Snapshot</h2>
+              <span className="nidaan-mono text-[10px] uppercase tracking-[0.1em] text-nidaan-muted">current source snapshot</span>
             </div>
             <div className="space-y-3">
               {Object.entries(telemetryView).map(([service, metrics]) => {
@@ -1084,7 +1132,7 @@ export default function DashboardPage() {
                       {Object.entries(metrics).map(([key, value]) => (
                         <div key={key} className="flex items-center justify-between gap-4">
                           <span className="nidaan-mono text-[11px] text-nidaan-muted">{key.replace(/_/g, " ")}</span>
-                          <span className={`nidaan-mono text-xs font-semibold ${metricLooksCritical(value) ? "metric-alert text-nidaan-danger" : "text-nidaan-ink"}`}>
+                          <span className={`nidaan-mono text-xs font-semibold ${metricLooksCritical(value) ? "text-nidaan-danger" : "text-nidaan-ink"}`}>
                             {String(value)}
                           </span>
                         </div>
@@ -1095,6 +1143,7 @@ export default function DashboardPage() {
               })}
             </div>
           </article>
+          )}
         </section>
 
         <section className="space-y-5 xl:col-span-8">
@@ -1135,7 +1184,7 @@ export default function DashboardPage() {
                     {analysisStage || "Running causal analysis..."}
                   </p>
                   <p className="max-w-md text-xs text-nidaan-muted">
-                    First response may take up to 45 seconds. Use <span className="nidaan-mono">Stop</span> to cancel and load a safe fallback.
+                    First response may take up to 45 seconds. Use <span className="nidaan-mono">Stop</span> to cancel the in-flight request.
                   </p>
                 </div>
               ) : graphResult ? (
@@ -1150,6 +1199,13 @@ export default function DashboardPage() {
                       </div>
                     </div>
                   )}
+                </div>
+              ) : analysisError ? (
+                <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
+                  <p className="text-sm font-semibold text-nidaan-danger">{analysisError}</p>
+                  <p className="max-w-md text-xs text-nidaan-muted">
+                    Synthetic fallback rendering is disabled in product mode. Retry once runtime is healthy.
+                  </p>
                 </div>
               ) : (
                 <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
@@ -1240,7 +1296,7 @@ export default function DashboardPage() {
                   </div>
                 </div>
 
-                {refutation && (
+                {expertMode && refutation && (
                   <div className="nidaan-card p-5">
                     <h3 className="nidaan-display mb-3 text-lg font-semibold text-nidaan-ink">Refutation Monitor</h3>
                     <div className="grid grid-cols-2 gap-3 text-sm">
@@ -1284,13 +1340,28 @@ export default function DashboardPage() {
               </div>
               <div className="mt-4">
                 {!authorized ? (
-                  <button
-                    id="authorize-intervention-btn"
-                    onClick={() => setAuthorized(true)}
-                    className="w-full rounded-xl bg-gradient-to-r from-nidaan-danger to-[#e1664b] px-5 py-3 text-sm font-bold text-white shadow-lg shadow-nidaan-danger/30 transition hover:brightness-105"
-                  >
-                    Human-in-the-loop: Authorize Intervention
-                  </button>
+                  <div className="space-y-3">
+                    <textarea
+                      value={authorizationReason}
+                      onChange={(event) => setAuthorizationReason(event.target.value)}
+                      rows={2}
+                      className="w-full rounded-2xl border border-nidaan-border bg-white p-3 text-sm text-nidaan-ink outline-none transition focus:border-nidaan-accent/45 focus:ring-2 focus:ring-nidaan-accent/15"
+                      placeholder="Approval reason (required for audit log)"
+                    />
+                    <button
+                      id="authorize-intervention-btn"
+                      onClick={() => {
+                        void authorizeIntervention();
+                      }}
+                      disabled={authorizationSubmitting}
+                      className="w-full rounded-xl bg-gradient-to-r from-nidaan-danger to-[#e1664b] px-5 py-3 text-sm font-bold text-white shadow-lg shadow-nidaan-danger/30 transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {authorizationSubmitting ? "Authorizing..." : "Human-in-the-loop: Authorize Intervention"}
+                    </button>
+                    {authorizationStatus && (
+                      <p className="text-xs text-nidaan-ink">{authorizationStatus}</p>
+                    )}
+                  </div>
                 ) : (
                   <div className="w-full rounded-xl border border-nidaan-success/30 bg-nidaan-success/15 px-5 py-3 text-center text-sm font-semibold text-nidaan-success">
                     Intervention Authorized. Execution can proceed through operator controls.
@@ -1341,25 +1412,6 @@ export default function DashboardPage() {
             </article>
           )}
 
-          <article className="nidaan-card p-5">
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="nidaan-display text-lg font-semibold text-nidaan-ink">Demo Links</h2>
-              <span className="nidaan-chip">Everything connected</span>
-            </div>
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-              {serviceLinks.map((link) => (
-                <a
-                  key={link.label}
-                  href={link.href}
-                  className="group rounded-2xl border border-nidaan-border bg-white p-3 transition hover:border-nidaan-accent/35 hover:shadow-md"
-                >
-                  <p className="text-sm font-semibold text-nidaan-ink group-hover:text-nidaan-accent-strong">{link.label}</p>
-                  <p className="mt-1 text-xs text-nidaan-muted">{link.hint}</p>
-                  <p className="mt-2 nidaan-mono text-[10px] text-nidaan-muted">{link.href}</p>
-                </a>
-              ))}
-            </div>
-          </article>
         </section>
       </main>
 
