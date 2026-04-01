@@ -277,20 +277,18 @@ export default function DashboardPage() {
   const [result, setResult] = useState<IncidentResult | null>(null);
   const [health, setHealth] = useState<HealthPayload | null>(null);
   const [telemetry, setTelemetry] = useState<Record<string, Record<string, string | number>> | null>(null);
-  const [incidentSummary, setIncidentSummary] = useState(INCIDENT_PRESETS[0].summary);
-  const [incidentSeverity, setIncidentSeverity] = useState(INCIDENT_PRESETS[0].severity);
-  const [incidentSignal, setIncidentSignal] = useState(INCIDENT_PRESETS[0].signal);
-  const [incidentImpact, setIncidentImpact] = useState(INCIDENT_PRESETS[0].impact);
-  const [incidentChange, setIncidentChange] = useState(INCIDENT_PRESETS[0].change);
+  const [incidentSummary, setIncidentSummary] = useState("");
+  const [incidentSeverity, setIncidentSeverity] = useState("SEV-2");
+  const [incidentSignal, setIncidentSignal] = useState("");
+  const [incidentImpact, setIncidentImpact] = useState("");
+  const [incidentChange, setIncidentChange] = useState("");
   const [incidentStartedAt, setIncidentStartedAt] = useState(() => {
     const now = new Date();
     const local = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
     return local.toISOString().slice(0, 16);
   });
-  const [affectedServices, setAffectedServices] = useState<string[]>(
-    INCIDENT_PRESETS[0].services
-  );
-  const [selectedPreset, setSelectedPreset] = useState(INCIDENT_PRESETS[0].id);
+  const [affectedServices, setAffectedServices] = useState<string[]>([]);
+  const [selectedPreset, setSelectedPreset] = useState("");
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [authorized, setAuthorized] = useState(false);
   const [authorizationSubmitting, setAuthorizationSubmitting] = useState(false);
@@ -780,14 +778,18 @@ export default function DashboardPage() {
         ? "border-nidaan-danger/35"
         : "border-nidaan-accent/25";
   const telemetryServiceCount = Object.keys(telemetry ?? {}).length;
+  const backendState = integrationCheck?.body === "online" || health ? "online" : "offline";
+  const frontendState = integrationCheck?.face === "offline" ? "offline" : "online";
+  const aiState = integrationCheck?.brain ?? "unknown";
 
   return (
     <div className="nidaan-shell min-h-screen text-nidaan-ink">
       <div className="nidaan-glow nidaan-glow-left" />
       <div className="nidaan-glow nidaan-glow-right" />
 
-      <header className="sticky top-0 z-50 border-b border-nidaan-border/80 bg-nidaan-paper">
-        <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-4 px-4 py-4 lg:flex-row lg:items-center lg:justify-between lg:px-6">
+      <header className="sticky top-0 z-50 border-b border-nidaan-border/70 bg-[#f4f9ff]/95 backdrop-blur-lg">
+        <div className="mx-auto w-full max-w-[1400px] px-4 py-4 lg:px-6">
+          <div className="nidaan-card flex flex-col gap-4 border border-nidaan-border/80 bg-gradient-to-r from-white to-[#f2f8ff] px-4 py-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-start gap-3">
             <img
               src="/sre-nidaan-mark.svg"
@@ -795,12 +797,15 @@ export default function DashboardPage() {
               className="h-12 w-12 rounded-2xl border border-white/80 shadow-md md:h-14 md:w-14"
             />
             <div>
-              <p className="nidaan-mono text-[10px] uppercase tracking-[0.16em] text-nidaan-muted">SRE NIDAAN</p>
-              <h1 className="nidaan-display text-2xl font-semibold text-nidaan-ink md:text-[30px]">
+              <p className="nidaan-mono text-[10px] uppercase tracking-[0.16em] text-nidaan-muted">SRE NIDAAN PLATFORM</p>
+              <h1 className="nidaan-display text-2xl font-semibold text-nidaan-ink md:text-[31px]">
                 SRE निदान Command Deck
               </h1>
+              <p className="text-sm font-medium text-nidaan-accent-strong">
+                घटना विश्लेषण · सुरक्षित हस्तक्षेप · विश्वसनीय संचालन
+              </p>
               <p className="text-sm text-nidaan-muted">
-                Clear incident diagnosis, safer approvals, and a guided operator workflow.
+                Incident diagnosis with evidence-backed causal reasoning and human safety control.
               </p>
             </div>
           </div>
@@ -810,7 +815,7 @@ export default function DashboardPage() {
               id="analyze-incident-btn"
               onClick={analyzeIncident}
               disabled={loading}
-              className="rounded-xl bg-gradient-to-r from-nidaan-accent to-nidaan-accent-strong px-4 py-2.5 text-sm font-semibold text-white shadow-md shadow-nidaan-accent/25 transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-55"
+              className="rounded-xl bg-gradient-to-r from-nidaan-accent to-nidaan-accent-strong px-4 py-2.5 text-sm font-semibold text-white shadow-md shadow-nidaan-accent/30 transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-55"
             >
               {loading ? "Analyzing..." : "Analyze Incident"}
             </button>
@@ -834,42 +839,35 @@ export default function DashboardPage() {
                 })();
               }}
               disabled={refreshingRuntime || checkingIntegration}
-              className="rounded-xl border border-nidaan-border bg-white px-3 py-2 text-sm font-medium text-nidaan-ink transition hover:border-nidaan-accent/40 hover:text-nidaan-accent disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-xl border border-nidaan-border bg-white px-3 py-2 text-sm font-semibold text-nidaan-ink transition hover:border-nidaan-accent/40 hover:text-nidaan-accent disabled:cursor-not-allowed disabled:opacity-60"
             >
               {refreshingRuntime || checkingIntegration ? "Checking..." : "Check System"}
             </button>
+          </div>
           </div>
         </div>
       </header>
 
       <div className="mx-auto w-full max-w-[1400px] px-4 pt-4 lg:px-6">
-        <div className={`nidaan-card flex flex-col gap-3 border ${runtimeToneClass} p-4 lg:flex-row lg:items-center lg:justify-between`}>
-          <p className="text-sm text-nidaan-ink">{statusMessage}</p>
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="nidaan-status-pill">
-              <span className={`nidaan-status-dot ${integrationCheck?.face === "offline" ? "bg-nidaan-danger" : "bg-nidaan-success"}`} />
-              frontend
-            </span>
-            <span className="nidaan-status-pill">
-              <span className={`nidaan-status-dot ${integrationCheck?.body === "online" || health ? "bg-nidaan-success" : "bg-nidaan-danger"}`} />
-              backend
-            </span>
-            <span className="nidaan-status-pill">
-              <span className={`nidaan-status-dot ${
-                telemetryState === "online" ? "bg-nidaan-success" : telemetryState === "online_simulated" ? "bg-nidaan-warning" : "bg-nidaan-danger"
-              }`} />
-              data: {telemetryLabel}
-            </span>
-            <span className="nidaan-status-pill">
-              <span className={`nidaan-status-dot ${
-                (integrationCheck?.brain ?? "unknown") === "ready"
-                  ? "bg-nidaan-success"
-                  : (integrationCheck?.brain ?? "unknown") === "warming"
-                    ? "bg-nidaan-warning"
-                    : "bg-nidaan-danger"
-              }`} />
-              ai: {integrationCheck?.brain ?? "unknown"}
-            </span>
+        <div className={`nidaan-card border ${runtimeToneClass} p-4`}>
+          <p className="mb-3 text-sm font-semibold text-nidaan-ink">{statusMessage}</p>
+          <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+            <div className="rounded-xl border border-nidaan-border bg-white px-3 py-2">
+              <p className="nidaan-mono text-[10px] text-nidaan-muted">frontend</p>
+              <p className={`text-sm font-semibold ${frontendState === "online" ? "text-nidaan-success" : "text-nidaan-danger"}`}>{frontendState}</p>
+            </div>
+            <div className="rounded-xl border border-nidaan-border bg-white px-3 py-2">
+              <p className="nidaan-mono text-[10px] text-nidaan-muted">backend</p>
+              <p className={`text-sm font-semibold ${backendState === "online" ? "text-nidaan-success" : "text-nidaan-danger"}`}>{backendState}</p>
+            </div>
+            <div className="rounded-xl border border-nidaan-border bg-white px-3 py-2">
+              <p className="nidaan-mono text-[10px] text-nidaan-muted">data feed</p>
+              <p className={`text-sm font-semibold ${telemetryState === "online" ? "text-nidaan-success" : telemetryState === "online_simulated" ? "text-nidaan-warning" : "text-nidaan-danger"}`}>{telemetryLabel}</p>
+            </div>
+            <div className="rounded-xl border border-nidaan-border bg-white px-3 py-2">
+              <p className="nidaan-mono text-[10px] text-nidaan-muted">ai engine</p>
+              <p className={`text-sm font-semibold ${aiState === "ready" ? "text-nidaan-success" : aiState === "warming" ? "text-nidaan-warning" : "text-nidaan-danger"}`}>{aiState}</p>
+            </div>
           </div>
         </div>
         {integrationCheckMessage && (
@@ -886,6 +884,9 @@ export default function DashboardPage() {
             </div>
             <p className="text-sm text-nidaan-muted">
               Build a realistic incident brief from telemetry signal, customer impact, and change context.
+            </p>
+            <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-nidaan-muted">
+              Optional templates
             </p>
             <div className="mt-4 flex flex-wrap gap-2">
               {INCIDENT_PRESETS.map((preset) => (
@@ -1016,7 +1017,7 @@ export default function DashboardPage() {
               onChange={(event) => setIncidentSummary(event.target.value)}
               rows={5}
               className="mt-4 w-full rounded-2xl border border-nidaan-border bg-white p-3 text-sm leading-relaxed text-nidaan-ink outline-none transition focus:border-nidaan-accent/45 focus:ring-2 focus:ring-nidaan-accent/15"
-              placeholder="This brief is sent to the analysis engine."
+              placeholder="Generate from the fields above, then edit this final brief before analysis."
             />
           </article>
 
