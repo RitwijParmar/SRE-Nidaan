@@ -12,6 +12,7 @@ HF_TOKEN_SECRET_NAME="${HF_TOKEN_SECRET_NAME:-hf-token}"
 HF_PRODUCTION_REPO_ID="${HF_PRODUCTION_REPO_ID:-ritwijar/SRE-Nidaan-Production}"
 PRODUCTION_ARTIFACT_LABEL="${PRODUCTION_ARTIFACT_LABEL:-checkpoint-1064}"
 BRAIN_STARTUP_PROBE="${BRAIN_STARTUP_PROBE:-timeoutSeconds=240,periodSeconds=240,failureThreshold=10,tcpSocket.port=8000}"
+FACE_BUILD_API_URL="${FACE_BUILD_API_URL:-}"
 
 if [[ ! -x "$GCLOUD_BIN" ]]; then
   echo "gcloud CLI not found at $GCLOUD_BIN" >&2
@@ -27,6 +28,13 @@ IMAGE_PREFIX="${REGION}-docker.pkg.dev/${PROJECT_ID}/${ARTIFACT_REPO}"
 BODY_IMAGE="${IMAGE_PREFIX}/sre-nidaan-body:${TAG}"
 FACE_IMAGE="${IMAGE_PREFIX}/sre-nidaan-face:${TAG}"
 BRAIN_IMAGE="${IMAGE_PREFIX}/sre-nidaan-brain:${TAG}"
+
+if [[ -z "$FACE_BUILD_API_URL" ]]; then
+  FACE_BUILD_API_URL="$("$GCLOUD_BIN" run services describe sre-nidaan-body --region "$REGION" --format='value(status.url)' 2>/dev/null || true)"
+fi
+if [[ -z "$FACE_BUILD_API_URL" ]]; then
+  FACE_BUILD_API_URL="http://localhost:8001"
+fi
 
 "$GCLOUD_BIN" services enable \
   artifactregistry.googleapis.com \
@@ -54,7 +62,7 @@ fi
 
 "$GCLOUD_BIN" builds submit \
   --config deploy/gcp/cloudbuild.yaml \
-  --substitutions=_REGION="${REGION}",_REPO="${ARTIFACT_REPO}",_TAG="${TAG}"
+  --substitutions=_REGION="${REGION}",_REPO="${ARTIFACT_REPO}",_TAG="${TAG}",_NEXT_PUBLIC_API_URL="${FACE_BUILD_API_URL}"
 
 "$GCLOUD_BIN" run deploy sre-nidaan-brain \
   --image "$BRAIN_IMAGE" \

@@ -1,0 +1,20 @@
+substitutions:
+  _REGION: us-east4
+  _REPO: sre-nidaan
+  _TAG: manual
+  _NEXT_PUBLIC_API_URL: http://localhost:8001
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - frontend/Dockerfile
+      - --build-arg
+      - NEXT_PUBLIC_API_URL=${_NEXT_PUBLIC_API_URL}
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/sre-nidaan-face:${_TAG}
+      - .
+
+images:
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/sre-nidaan-face:${_TAG}
