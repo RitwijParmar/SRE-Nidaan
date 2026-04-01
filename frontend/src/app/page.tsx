@@ -549,16 +549,12 @@ export default function DashboardPage() {
             </button>
             <a
               href={`${BODY_BASE}/health`}
-              target="_blank"
-              rel="noopener noreferrer"
               className="rounded-full border border-nidaan-border bg-white px-4 py-2 text-sm font-medium text-nidaan-ink transition hover:border-nidaan-accent/40 hover:text-nidaan-accent"
             >
               Runtime Health
             </a>
             <a
               href={`${BODY_BASE}/docs`}
-              target="_blank"
-              rel="noopener noreferrer"
               className="rounded-full border border-nidaan-border bg-white px-4 py-2 text-sm font-medium text-nidaan-ink transition hover:border-nidaan-accent/40 hover:text-nidaan-accent"
             >
               API Docs
@@ -999,8 +995,6 @@ export default function DashboardPage() {
                 <a
                   key={link.label}
                   href={link.href}
-                  target="_blank"
-                  rel="noopener noreferrer"
                   className="group rounded-2xl border border-nidaan-border bg-white p-3 transition hover:border-nidaan-accent/35 hover:shadow-md"
                 >
                   <p className="text-sm font-semibold text-nidaan-ink group-hover:text-nidaan-accent-strong">{link.label}</p>
