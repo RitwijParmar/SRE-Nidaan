@@ -101,6 +101,7 @@ FEEDBACK_DB_PATH = os.environ.get(
 )
 TELEMETRY_SOURCE_URL = os.environ.get("TELEMETRY_SOURCE_URL", "").strip()
 API_AUTH_TOKEN = os.environ.get("API_AUTH_TOKEN", "").strip()
+REQUIRE_API_AUTH = _env_bool("REQUIRE_API_AUTH", False)
 REQUIRE_TENANT_ID = _env_bool("REQUIRE_TENANT_ID", True)
 ALLOWED_ORIGINS = _env_csv(
     "ALLOWED_ORIGINS",
@@ -147,7 +148,12 @@ async def enforce_api_security(request: Request, call_next):
                 status_code=400,
                 content={"detail": "missing required header: x-tenant-id"},
             )
-        if API_AUTH_TOKEN:
+        if REQUIRE_API_AUTH and not API_AUTH_TOKEN:
+            return JSONResponse(
+                status_code=503,
+                content={"detail": "api auth required but API_AUTH_TOKEN is not configured"},
+            )
+        if REQUIRE_API_AUTH or API_AUTH_TOKEN:
             provided_token = request.headers.get("x-api-key", "").strip()
             if provided_token != API_AUTH_TOKEN:
                 return JSONResponse(
@@ -704,7 +710,70 @@ def _feedback_db_connection() -> sqlite3.Connection:
         )
         """
     )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS incident_analyses (
+            analysis_id TEXT PRIMARY KEY,
+            tenant_id TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
     return connection
+
+
+def _persist_analysis_snapshot(
+    *,
+    analysis_id: str,
+    tenant_id: str,
+    payload: dict[str, Any],
+    created_at: str,
+) -> None:
+    with _feedback_db_connection() as connection:
+        connection.execute(
+            """
+            INSERT OR REPLACE INTO incident_analyses (
+                analysis_id,
+                tenant_id,
+                payload_json,
+                created_at
+            )
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                analysis_id,
+                tenant_id,
+                json.dumps(payload),
+                created_at,
+            ),
+        )
+
+
+def _load_analysis_snapshot(analysis_id: str) -> tuple[dict[str, Any], str] | None:
+    with _feedback_db_connection() as connection:
+        row = connection.execute(
+            """
+            SELECT payload_json, tenant_id
+            FROM incident_analyses
+            WHERE analysis_id = ?
+            """,
+            (analysis_id,),
+        ).fetchone()
+
+    if not row:
+        return None
+
+    payload_json, tenant_id = row
+    try:
+        payload = json.loads(payload_json)
+    except Exception as exc:
+        logger.warning("Stored analysis payload is invalid JSON for %s (%s)", analysis_id, exc)
+        return None
+
+    if not isinstance(payload, dict):
+        return None
+    return payload, str(tenant_id or "")
 
 
 def _to_brain_health_url(vllm_endpoint: str) -> str:
@@ -931,6 +1000,15 @@ async def analyze_incident(
     )
     _analysis_cache[analysis_id] = result.model_dump()
     _analysis_tenants[analysis_id] = request_tenant_id
+    try:
+        _persist_analysis_snapshot(
+            analysis_id=analysis_id,
+            tenant_id=request_tenant_id,
+            payload=result.model_dump(),
+            created_at=result.timestamp,
+        )
+    except Exception as exc:
+        logger.warning("Failed to persist incident analysis snapshot (%s).", exc)
     background_tasks.add_task(_run_refutation_background, analysis)
     return result
 
@@ -1024,18 +1102,20 @@ async def integration_check() -> dict[str, Any]:
     brain_ok, brain_payload = await _probe_json_url(brain_health_url)
     telemetry_probe = MCP_ROUTER.call_tool("sre.telemetry.get_snapshot", {})
     telemetry_source = str(telemetry_probe.get("source", "unknown"))
+    telemetry_is_live = telemetry_source.startswith("live-http:")
     brain_status = "offline"
     if brain_ok:
         brain_status = str((brain_payload or {}).get("status", "online"))
+    telemetry_status = "online" if telemetry_is_live else "online-simulated"
 
     return {
-        "status": "ok" if brain_ok else "degraded",
+        "status": "ok" if brain_ok and telemetry_is_live else "degraded",
         "service": "sre-nidaan-body",
         "checked_at": datetime.now(timezone.utc).isoformat(),
         "services": {
             "face": "browser-origin",
             "body": "online",
-            "telemetry_api": "online",
+            "telemetry_api": telemetry_status,
             "brain": brain_status,
         },
         "endpoints": {
@@ -1047,6 +1127,11 @@ async def integration_check() -> dict[str, Any]:
             "Use this endpoint for one-click integration diagnostics.",
             "Brain status is probed from the configured VLLM endpoint.",
             f"Telemetry source: {telemetry_source}",
+            (
+                "Telemetry is live from external source."
+                if telemetry_is_live
+                else "Telemetry is simulated/static. Connect TELEMETRY_SOURCE_URL for production trust."
+            ),
         ],
     }
 
@@ -1064,12 +1149,20 @@ async def authorize_intervention(
         )
 
     analysis_payload = _analysis_cache.get(payload.analysis_id)
+    expected_tenant_id = _analysis_tenants.get(payload.analysis_id)
+    if not analysis_payload or not expected_tenant_id:
+        persisted = _load_analysis_snapshot(payload.analysis_id)
+        if persisted:
+            analysis_payload, expected_tenant_id = persisted
+            _analysis_cache[payload.analysis_id] = analysis_payload
+            _analysis_tenants[payload.analysis_id] = expected_tenant_id
+
     if not analysis_payload:
         raise HTTPException(
             status_code=404,
             detail=f"analysis_id not found: {payload.analysis_id}",
         )
-    expected_tenant_id = _analysis_tenants.get(payload.analysis_id)
+
     if expected_tenant_id and expected_tenant_id != payload.tenant_id.strip():
         raise HTTPException(
             status_code=403,
@@ -1158,6 +1251,7 @@ async def health() -> dict[str, Any]:
         "mcp_tools_registered": len(MCP_ROUTER.list_tools()),
         "telemetry_source_url": TELEMETRY_SOURCE_URL or "simulated-static",
         "require_tenant_id": REQUIRE_TENANT_ID,
+        "require_api_auth": REQUIRE_API_AUTH,
         "api_auth_enabled": bool(API_AUTH_TOKEN),
     }
 

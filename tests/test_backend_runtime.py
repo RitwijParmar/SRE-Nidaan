@@ -225,6 +225,81 @@ class BackendRuntimeTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 403)
 
+    def test_authorize_intervention_loads_analysis_from_persistent_store(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            feedback_db_path = Path(temp_dir) / "analyst_feedback.db"
+            feedback_log_path = Path(temp_dir) / "analyst_feedback.jsonl"
+            with patch.object(
+                backend_main,
+                "FEEDBACK_DB_PATH",
+                str(feedback_db_path),
+            ), patch.object(
+                backend_main,
+                "FEEDBACK_LOG_PATH",
+                str(feedback_log_path),
+            ), patch.object(
+                backend_main,
+                "_brain_ready_for_inference",
+                new=AsyncMock(return_value=False),
+            ), patch.object(
+                backend_main,
+                "_run_refutation_background",
+                new=AsyncMock(return_value=None),
+            ):
+                analyze_response = self.client.post(
+                    "/api/analyze-incident",
+                    json={"incident_summary": "Auth retries + DB saturation"},
+                    headers={"x-tenant-id": "tenant-a"},
+                )
+                self.assertEqual(analyze_response.status_code, 200)
+                analysis_id = analyze_response.json()["analysis_id"]
+
+                backend_main._analysis_cache.clear()
+                backend_main._analysis_tenants.clear()
+
+                authorize_response = self.client.post(
+                    "/api/interventions/authorize",
+                    json={
+                        "analysis_id": analysis_id,
+                        "operator_id": "alice",
+                        "tenant_id": "tenant-a",
+                        "reason": "Incident commander approves safe intervention path.",
+                    },
+                    headers={"x-tenant-id": "tenant-a"},
+                )
+
+            self.assertEqual(authorize_response.status_code, 200)
+            payload = authorize_response.json()
+            self.assertEqual(payload["status"], "authorized")
+            self.assertEqual(payload["analysis_id"], analysis_id)
+
+    def test_api_key_enforcement_mode_requires_valid_key(self) -> None:
+        with patch.object(backend_main, "REQUIRE_API_AUTH", True), patch.object(
+            backend_main, "API_AUTH_TOKEN", "super-secret"
+        ):
+            without_key = self.client.get(
+                "/api/mcp/tools",
+                headers={"x-tenant-id": "tenant-a"},
+            )
+            with_key = self.client.get(
+                "/api/mcp/tools",
+                headers={"x-tenant-id": "tenant-a", "x-api-key": "super-secret"},
+            )
+
+        self.assertEqual(without_key.status_code, 401)
+        self.assertEqual(with_key.status_code, 200)
+
+    def test_api_key_enforcement_mode_returns_503_when_misconfigured(self) -> None:
+        with patch.object(backend_main, "REQUIRE_API_AUTH", True), patch.object(
+            backend_main, "API_AUTH_TOKEN", ""
+        ):
+            response = self.client.get(
+                "/api/mcp/tools",
+                headers={"x-tenant-id": "tenant-a"},
+            )
+
+        self.assertEqual(response.status_code, 503)
+
     def test_api_endpoints_require_tenant_header(self) -> None:
         response = self.client.get("/api/mcp/tools")
         self.assertEqual(response.status_code, 400)

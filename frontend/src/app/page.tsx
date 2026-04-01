@@ -91,7 +91,7 @@ interface BrainHealthPayload {
 interface IntegrationCheck {
   face: "online" | "offline";
   body: "online" | "offline";
-  telemetry: "online" | "offline";
+  telemetry: "online" | "online_simulated" | "offline";
   brain: "ready" | "warming" | "error" | "unknown";
   checked_at: string;
 }
@@ -229,6 +229,23 @@ function normalizeOnlineState(value: string | undefined, fallback: "online" | "o
   }
   const compact = value.toLowerCase();
   return compact.includes("online") || compact.includes("browser-origin") ? "online" : "offline";
+}
+
+function normalizeTelemetryState(
+  value: string | undefined,
+  fallback: IntegrationCheck["telemetry"] = "offline"
+): IntegrationCheck["telemetry"] {
+  if (!value) {
+    return fallback;
+  }
+  const compact = value.toLowerCase();
+  if (compact.includes("simulated")) {
+    return "online_simulated";
+  }
+  if (compact.includes("online")) {
+    return "online";
+  }
+  return "offline";
 }
 
 function normalizeBrainState(value: string | undefined): IntegrationCheck["brain"] {
@@ -466,7 +483,7 @@ export default function DashboardPage() {
           checkedAt = integrationPayload.checked_at || checkedAt;
           faceStatus = normalizeOnlineState(integrationPayload.services?.face, "online");
           bodyStatus = normalizeOnlineState(integrationPayload.services?.body, "online");
-          telemetryStatus = normalizeOnlineState(
+          telemetryStatus = normalizeTelemetryState(
             integrationPayload.services?.telemetry_api,
             telemetryStatus
           );
@@ -474,7 +491,7 @@ export default function DashboardPage() {
             integrationPayload.services?.brain || brainPayload?.status
           );
           setIntegrationCheckMessage(
-            `Integration ${integrationPayload.status} · checked ${shortTimestamp(checkedAt)} · brain ${brainStatus}.`
+            `Integration ${integrationPayload.status} · checked ${shortTimestamp(checkedAt)} · brain ${brainStatus} · telemetry ${telemetryStatus.replace("_", "-")}.`
           );
         } else {
           setIntegrationSnapshot(null);
@@ -958,6 +975,11 @@ export default function DashboardPage() {
                 <p className="mt-1 text-xs text-nidaan-muted">
                   Detailed runtime metadata is available in expert mode.
                 </p>
+                {integrationCheck?.telemetry === "online_simulated" && (
+                  <p className="mt-2 text-xs text-nidaan-warning">
+                    Telemetry source is simulated. Connect live telemetry for production-grade trust.
+                  </p>
+                )}
               </div>
             )}
 
@@ -1045,7 +1067,11 @@ export default function DashboardPage() {
               <div className="rounded-xl border border-nidaan-border bg-white p-3">
                 <p className="nidaan-mono text-[10px] uppercase tracking-wider text-nidaan-muted">telemetry api</p>
                 <p className={`mt-1 text-xs font-semibold ${
-                  integrationCheck?.telemetry === "online" ? "text-nidaan-success" : "text-nidaan-danger"
+                  integrationCheck?.telemetry === "online"
+                    ? "text-nidaan-success"
+                    : integrationCheck?.telemetry === "online_simulated"
+                      ? "text-nidaan-warning"
+                      : "text-nidaan-danger"
                 }`}>
                   {integrationCheck?.telemetry ?? "checking"}
                 </p>
