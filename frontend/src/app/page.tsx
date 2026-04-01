@@ -282,6 +282,7 @@ export default function DashboardPage() {
   const [refutation, setRefutation] = useState<Record<string, unknown> | null>(null);
   const [integrationCheck, setIntegrationCheck] = useState<IntegrationCheck | null>(null);
   const [checkingIntegration, setCheckingIntegration] = useState(false);
+  const [integrationCheckMessage, setIntegrationCheckMessage] = useState<string | null>(null);
 
   const serviceLinks = useMemo(
     () => [
@@ -299,6 +300,7 @@ export default function DashboardPage() {
   const runIntegrationCheck = useCallback(
     async (seedHealth: HealthPayload | null) => {
       setCheckingIntegration(true);
+      setIntegrationCheckMessage("Running integration check...");
       const sourceHealth = seedHealth;
       const brainHealthUrl = sourceHealth ? toBrainHealthUrl(sourceHealth.vllm_endpoint) : null;
 
@@ -326,21 +328,32 @@ export default function DashboardPage() {
           }
         }
 
+        const bodyStatus: IntegrationCheck["body"] = bodyRes.ok ? "online" : "offline";
+        const telemetryStatus: IntegrationCheck["telemetry"] = telemetryRes.ok ? "online" : "offline";
+        const checkedAt = new Date().toISOString();
+
         setIntegrationCheck({
           face: "online",
-          body: bodyRes.ok ? "online" : "offline",
-          telemetry: telemetryRes.ok ? "online" : "offline",
+          body: bodyStatus,
+          telemetry: telemetryStatus,
           brain: brainStatus,
-          checked_at: new Date().toISOString(),
+          checked_at: checkedAt,
         });
+        setIntegrationCheckMessage(
+          `Checked ${shortTimestamp(checkedAt)} · body ${bodyStatus} · telemetry ${telemetryStatus} · brain ${brainStatus}.`
+        );
       } catch {
+        const checkedAt = new Date().toISOString();
         setIntegrationCheck({
           face: "online",
           body: "offline",
           telemetry: "offline",
           brain: "unknown",
-          checked_at: new Date().toISOString(),
+          checked_at: checkedAt,
         });
+        setIntegrationCheckMessage(
+          `Checked ${shortTimestamp(checkedAt)} · integration check failed (body/telemetry unreachable).`
+        );
       } finally {
         setCheckingIntegration(false);
       }
@@ -567,6 +580,11 @@ export default function DashboardPage() {
               {checkingIntegration ? "Checking..." : "Integration Check"}
             </button>
           </div>
+          {integrationCheckMessage && (
+            <p className="nidaan-mono text-[11px] text-nidaan-muted lg:text-right">
+              {integrationCheckMessage}
+            </p>
+          )}
         </div>
       </header>
 
