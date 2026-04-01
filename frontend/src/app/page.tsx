@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import CausalGraph from "@/components/CausalGraph";
 
 interface DAGNode {
@@ -320,6 +320,8 @@ export default function DashboardPage() {
   const [candidateCount, setCandidateCount] = useState(3);
   const [authorized, setAuthorized] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [refreshingRuntime, setRefreshingRuntime] = useState(false);
+  const [analysisStage, setAnalysisStage] = useState<string | null>(null);
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
   const [feedbackNote, setFeedbackNote] = useState("");
   const [feedbackStatus, setFeedbackStatus] = useState<string | null>(null);
@@ -330,6 +332,7 @@ export default function DashboardPage() {
   const [integrationSnapshot, setIntegrationSnapshot] = useState<IntegrationSnapshot | null>(null);
   const [checkingIntegration, setCheckingIntegration] = useState(false);
   const [integrationCheckMessage, setIntegrationCheckMessage] = useState<string | null>(null);
+  const analysisAbortRef = useRef<AbortController | null>(null);
 
   const serviceLinks = useMemo(
     () => [
@@ -346,37 +349,48 @@ export default function DashboardPage() {
   const telemetryView = result?.telemetry_snapshot ?? telemetry ?? STATIC_TELEMETRY;
 
   const refreshRuntime = useCallback(async (): Promise<HealthPayload> => {
-    const [healthRes, telemetryRes] = await Promise.all([
-      fetch(`${BODY_BASE}/health`),
-      fetch(`${API_BASE}/telemetry`),
-    ]);
-
-    if (!healthRes.ok) {
-      throw new Error(`health check failed (${healthRes.status})`);
-    }
-
-    const healthPayload: HealthPayload = await healthRes.json();
-    const telemetryPayload = telemetryRes.ok
-      ? ((await telemetryRes.json()) as Record<string, Record<string, string | number>>)
-      : null;
-
-    let brainPayload: BrainHealthPayload | null = null;
+    setRefreshingRuntime(true);
+    setStatusTone("info");
+    setStatusMessage("Refreshing runtime status...");
     try {
-      const brainHealthResponse = await fetch(toBrainHealthUrl(healthPayload.vllm_endpoint));
-      if (brainHealthResponse.ok) {
-        brainPayload = (await brainHealthResponse.json()) as BrainHealthPayload;
-      }
-    } catch {
-      // Best effort only.
-    }
+      const [healthRes, telemetryRes] = await Promise.all([
+        fetch(`${BODY_BASE}/health`),
+        fetch(`${API_BASE}/telemetry`),
+      ]);
 
-    setHealth(healthPayload);
-    setBrainHealth(brainPayload);
-    setTelemetry(telemetryPayload);
-    setCandidateCount(Math.max(1, Math.min(8, healthPayload.default_candidate_count || 3)));
-    setStatusTone("success");
-    setStatusMessage("Runtime connected. Pick a scenario and run causal analysis.");
-    return healthPayload;
+      if (!healthRes.ok) {
+        throw new Error(`health check failed (${healthRes.status})`);
+      }
+
+      const healthPayload: HealthPayload = await healthRes.json();
+      const telemetryPayload = telemetryRes.ok
+        ? ((await telemetryRes.json()) as Record<string, Record<string, string | number>>)
+        : null;
+
+      let brainPayload: BrainHealthPayload | null = null;
+      try {
+        const brainHealthResponse = await fetch(toBrainHealthUrl(healthPayload.vllm_endpoint));
+        if (brainHealthResponse.ok) {
+          brainPayload = (await brainHealthResponse.json()) as BrainHealthPayload;
+        }
+      } catch {
+        // Best effort only.
+      }
+
+      setHealth(healthPayload);
+      setBrainHealth(brainPayload);
+      setTelemetry(telemetryPayload);
+      setCandidateCount(Math.max(1, Math.min(8, healthPayload.default_candidate_count || 3)));
+      setStatusTone("success");
+      setStatusMessage("Runtime refreshed and synchronized.");
+      return healthPayload;
+    } catch (error) {
+      setStatusTone("error");
+      setStatusMessage("Runtime refresh failed. Verify backend/brain health.");
+      throw error;
+    } finally {
+      setRefreshingRuntime(false);
+    }
   }, [API_BASE, BODY_BASE]);
 
   const runIntegrationCheck = useCallback(
@@ -509,7 +523,17 @@ export default function DashboardPage() {
   }, [API_BASE]);
 
   const analyzeIncident = useCallback(async () => {
+    if (loading) {
+      return;
+    }
+    const abortController = new AbortController();
+    analysisAbortRef.current = abortController;
+    const timeoutHandle = window.setTimeout(() => {
+      abortController.abort("timeout");
+    }, 45000);
+
     setLoading(true);
+    setAnalysisStage("Collecting telemetry and prompting the causal model...");
     setAuthorized(false);
     setFeedbackStatus(null);
     setRefutation(null);
@@ -520,6 +544,7 @@ export default function DashboardPage() {
       const response = await fetch(`${API_BASE}/analyze-incident`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: abortController.signal,
         body: JSON.stringify({
           incident_summary: incidentSummary,
           candidate_count: candidateCount,
@@ -531,6 +556,7 @@ export default function DashboardPage() {
       }
 
       const payload: IncidentResult = await response.json();
+      setAnalysisStage("Rendering causal graph...");
       setResult(payload);
       setTelemetry(payload.telemetry_snapshot);
       setStatusTone("success");
@@ -542,18 +568,35 @@ export default function DashboardPage() {
       void pollRefutation();
     } catch (err) {
       console.error(err);
+      const aborted = abortController.signal.aborted;
       const fallback = buildLocalFallbackResult(
         incidentSummary,
         telemetry ?? STATIC_TELEMETRY
       );
       setResult(fallback);
       setTelemetry(fallback.telemetry_snapshot);
-      setStatusTone("error");
-      setStatusMessage("Live inference failed. Showing deterministic fallback analysis.");
+      if (aborted) {
+        setStatusTone("error");
+        setStatusMessage("Analysis stopped or timed out. Showing deterministic fallback analysis.");
+      } else {
+        setStatusTone("error");
+        setStatusMessage("Live inference failed. Showing deterministic fallback analysis.");
+      }
     } finally {
+      window.clearTimeout(timeoutHandle);
+      if (analysisAbortRef.current === abortController) {
+        analysisAbortRef.current = null;
+      }
       setLoading(false);
+      setAnalysisStage(null);
     }
-  }, [API_BASE, candidateCount, incidentSummary, pollRefutation, telemetry]);
+  }, [API_BASE, candidateCount, incidentSummary, loading, pollRefutation, telemetry]);
+
+  const stopAnalysis = useCallback(() => {
+    if (analysisAbortRef.current) {
+      analysisAbortRef.current.abort("manual-stop");
+    }
+  }, []);
 
   const submitFeedback = useCallback(
     async (rating: "useful" | "needs_correction") => {
@@ -632,13 +675,29 @@ export default function DashboardPage() {
             >
               {loading ? "Analyzing..." : "Analyze Incident"}
             </button>
+            {loading && (
+              <button
+                onClick={stopAnalysis}
+                className="rounded-full border border-nidaan-danger/35 bg-nidaan-danger/10 px-4 py-2 text-sm font-semibold text-nidaan-danger transition hover:bg-nidaan-danger/15"
+              >
+                Stop
+              </button>
+            )}
             <button
               onClick={() => {
-                void refreshRuntime();
+                void (async () => {
+                  try {
+                    const payload = await refreshRuntime();
+                    await runIntegrationCheck(payload);
+                  } catch {
+                    // status banner already updated in refreshRuntime
+                  }
+                })();
               }}
-              className="rounded-full border border-nidaan-border bg-white px-4 py-2 text-sm font-medium text-nidaan-ink transition hover:border-nidaan-accent/40 hover:text-nidaan-accent"
+              disabled={refreshingRuntime || checkingIntegration}
+              className="rounded-full border border-nidaan-border bg-white px-4 py-2 text-sm font-medium text-nidaan-ink transition hover:border-nidaan-accent/40 hover:text-nidaan-accent disabled:cursor-not-allowed disabled:opacity-60"
             >
-              Refresh Runtime
+              {refreshingRuntime ? "Refreshing..." : "Refresh Runtime"}
             </button>
             <a
               href={`${BODY_BASE}/docs`}
@@ -650,7 +709,7 @@ export default function DashboardPage() {
               onClick={() => {
                 void runIntegrationCheck(health);
               }}
-              disabled={checkingIntegration}
+              disabled={checkingIntegration || refreshingRuntime}
               className="rounded-full border border-nidaan-border bg-white px-4 py-2 text-sm font-medium text-nidaan-ink transition hover:border-nidaan-accent/40 hover:text-nidaan-accent disabled:cursor-not-allowed disabled:opacity-60"
             >
               {checkingIntegration ? "Checking..." : "Integration Check"}
@@ -920,7 +979,11 @@ export default function DashboardPage() {
           <article className="nidaan-card overflow-hidden">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-nidaan-border/80 bg-white/80 px-5 py-3">
               <h2 className="nidaan-display text-lg font-semibold text-nidaan-ink">Causal Graph Workspace</h2>
-              {result ? (
+              {loading ? (
+                <span className="rounded-full border border-nidaan-warning/30 bg-nidaan-warning/10 px-2 py-1 nidaan-mono text-[11px] text-nidaan-warning">
+                  running analysis...
+                </span>
+              ) : result ? (
                 <div className="flex flex-wrap items-center gap-2 text-[11px]">
                   <span className={`rounded-full border px-2 py-1 nidaan-mono ${
                     result.verifier.accepted
@@ -943,7 +1006,17 @@ export default function DashboardPage() {
               )}
             </div>
             <div className="h-[460px]">
-              {result ? (
+              {loading && !result ? (
+                <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
+                  <div className="h-10 w-10 rounded-full border-4 border-nidaan-accent/25 border-t-nidaan-accent animate-spin" />
+                  <p className="text-sm font-semibold text-nidaan-ink">
+                    {analysisStage || "Running causal analysis..."}
+                  </p>
+                  <p className="max-w-md text-xs text-nidaan-muted">
+                    First response may take up to 45 seconds. Use <span className="nidaan-mono">Stop</span> to cancel and load a safe fallback.
+                  </p>
+                </div>
+              ) : result ? (
                 <CausalGraph nodes={result.analysis.dag_nodes} edges={result.analysis.dag_edges} />
               ) : (
                 <div className="flex h-full flex-col items-center justify-center gap-2 text-center">

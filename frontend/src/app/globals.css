@@ -67,12 +67,13 @@ a {
 }
 
 .nidaan-glow {
-  position: fixed;
+  position: absolute;
   z-index: 0;
   pointer-events: none;
   border-radius: 999px;
   filter: blur(70px);
   opacity: 0.55;
+  transform: translateZ(0);
 }
 
 .nidaan-glow-left {
