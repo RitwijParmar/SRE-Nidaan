@@ -5,17 +5,17 @@
 @import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700;800&family=Sora:wght@500;600;700;800&display=swap");
 
 :root {
-  --nidaan-shell: #f1f5fb;
+  --nidaan-shell: #eef3f9;
   --nidaan-paper: #ffffff;
-  --nidaan-panel: #eef4fb;
-  --nidaan-ink: #0f2238;
-  --nidaan-muted: #445b75;
-  --nidaan-accent: #0d6e69;
-  --nidaan-accent-strong: #1a4f9f;
-  --nidaan-success: #0f8a5f;
-  --nidaan-warning: #b76a12;
-  --nidaan-danger: #c0372f;
-  --nidaan-border: #cad8e8;
+  --nidaan-panel: #edf3fb;
+  --nidaan-ink: #13243a;
+  --nidaan-muted: #4a5f7a;
+  --nidaan-accent: #0a7f78;
+  --nidaan-accent-strong: #155fd2;
+  --nidaan-success: #0f8a63;
+  --nidaan-warning: #b76b16;
+  --nidaan-danger: #c03f37;
+  --nidaan-border: #c6d6e8;
 }
 
 * {
@@ -53,16 +53,16 @@ a {
 }
 
 ::-webkit-scrollbar-track {
-  background: #e8eff8;
+  background: #e7eef7;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #a8bcd3;
+  background: #9cb4cf;
   border-radius: 20px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #8aa4c2;
+  background: #7f9bbc;
 }
 
 .nidaan-shell {
@@ -70,9 +70,9 @@ a {
   isolation: isolate;
   overflow: clip;
   background:
-    radial-gradient(circle at 8% -10%, rgba(26, 79, 159, 0.18), transparent 40%),
-    radial-gradient(circle at 94% 0%, rgba(13, 110, 105, 0.14), transparent 38%),
-    linear-gradient(180deg, #f8fbff 0%, #f1f5fb 100%);
+    radial-gradient(circle at 7% -8%, rgba(21, 95, 210, 0.19), transparent 43%),
+    radial-gradient(circle at 93% 1%, rgba(10, 127, 120, 0.13), transparent 38%),
+    linear-gradient(180deg, #f9fbff 0%, #eef3f9 100%);
 }
 
 .nidaan-glow {
@@ -80,8 +80,8 @@ a {
   z-index: 0;
   pointer-events: none;
   border-radius: 999px;
-  filter: blur(86px);
-  opacity: 0.26;
+  filter: blur(92px);
+  opacity: 0.22;
   transform: translateZ(0);
 }
 
@@ -90,7 +90,7 @@ a {
   height: 360px;
   left: -90px;
   top: 48px;
-  background: rgba(26, 79, 159, 0.18);
+  background: rgba(21, 95, 210, 0.2);
 }
 
 .nidaan-glow-right {
@@ -98,16 +98,16 @@ a {
   height: 320px;
   right: -90px;
   top: 124px;
-  background: rgba(13, 110, 105, 0.16);
+  background: rgba(10, 127, 120, 0.17);
 }
 
 .nidaan-card {
   position: relative;
   z-index: 1;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(250, 252, 255, 0.98));
-  border: 1px solid rgba(202, 216, 232, 0.9);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(247, 251, 255, 0.99));
+  border: 1px solid rgba(198, 214, 232, 0.9);
   border-radius: 22px;
-  box-shadow: 0 14px 32px rgba(15, 35, 58, 0.08);
+  box-shadow: 0 16px 36px rgba(18, 37, 60, 0.09);
 }
 
 .nidaan-display {
@@ -123,9 +123,9 @@ a {
   display: inline-flex;
   align-items: center;
   border-radius: 999px;
-  border: 1px solid rgba(26, 79, 159, 0.22);
-  background: rgba(26, 79, 159, 0.1);
-  color: #15427a;
+  border: 1px solid rgba(21, 95, 210, 0.24);
+  background: rgba(21, 95, 210, 0.11);
+  color: #184d93;
   padding: 0.3rem 0.64rem;
   font-size: 10px;
   font-weight: 800;
@@ -169,35 +169,35 @@ a {
 }
 
 .react-flow__background {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(239, 246, 255, 0.98) 100%) !important;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.99) 0%, rgba(236, 245, 255, 0.99) 100%) !important;
 }
 
 .react-flow__controls {
-  border: 1px solid #cad8e8 !important;
+  border: 1px solid #c6d6e8 !important;
   border-radius: 10px !important;
   background: rgba(255, 255, 255, 0.94) !important;
   box-shadow: 0 10px 24px rgba(18, 32, 51, 0.1);
 }
 
 .react-flow__controls-button {
-  border-color: #cad8e8 !important;
+  border-color: #c6d6e8 !important;
   background: rgba(255, 255, 255, 0.94) !important;
   fill: #4f647d !important;
 }
 
 .react-flow__controls-button:hover {
-  background: #edf3fc !important;
+  background: #eaf2fc !important;
   fill: #10233a !important;
 }
 
 .react-flow__minimap {
-  border: 1px solid #cad8e8 !important;
+  border: 1px solid #c6d6e8 !important;
   border-radius: 10px !important;
   background: rgba(255, 255, 255, 0.94) !important;
 }
 
 .react-flow__edge-path {
-  stroke: #0b7a75 !important;
+  stroke: #0a7f78 !important;
   stroke-width: 2 !important;
 }
 

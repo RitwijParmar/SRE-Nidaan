@@ -42,6 +42,33 @@ function CausalNode({
 }: {
   data: { label: string; role: "entry" | "junction" | "outcome"; selected: boolean };
 }) {
+  const theme =
+    data.role === "entry"
+      ? {
+          border: "#85b7f5",
+          borderStrong: "#2d7de4",
+          badgeBorder: "#b6d5fb",
+          badgeBg: "#edf5ff",
+          badgeText: "#245da0",
+          glow: "rgba(45, 125, 228, 0.2)",
+        }
+      : data.role === "outcome"
+        ? {
+            border: "#9acfbf",
+            borderStrong: "#1f9a73",
+            badgeBorder: "#c1e4d8",
+            badgeBg: "#eefaf5",
+            badgeText: "#1d7056",
+            glow: "rgba(31, 154, 115, 0.2)",
+          }
+        : {
+            border: "#c7d5e8",
+            borderStrong: "#4f6f95",
+            badgeBorder: "#dae5f3",
+            badgeBg: "#f4f8fc",
+            badgeText: "#466182",
+            glow: "rgba(79, 111, 149, 0.18)",
+          };
   const roleLabel =
     data.role === "entry"
       ? "entry"
@@ -53,26 +80,35 @@ function CausalNode({
       <Handle
         type="target"
         position={Position.Top}
-        className="!h-2.5 !w-2.5 !border-[#0b7a75] !bg-[#0b7a75]"
+        className="!h-2.5 !w-2.5 !border-[#0a7f78] !bg-[#0a7f78]"
       />
       <div
-        className={`min-w-[180px] cursor-pointer rounded-2xl border bg-gradient-to-br from-[#ffffff] to-[#eef5ff] px-5 py-3 text-center shadow-md shadow-[#122033]/10 transition-all duration-200 group-hover:border-[#0b7a75]/55 group-hover:shadow-lg group-hover:shadow-[#122033]/15 ${
-          data.selected
-            ? "border-[#0b7a75] ring-2 ring-[#0b7a75]/20"
-            : "border-[#0e5cb5]/30"
-        }`}
+        className="min-w-[190px] cursor-pointer rounded-2xl border bg-gradient-to-br from-white to-[#eef5ff] px-5 py-3 text-center shadow-md shadow-[#122033]/10 transition-all duration-200 group-hover:shadow-lg group-hover:shadow-[#122033]/15"
+        style={{
+          borderColor: data.selected ? theme.borderStrong : theme.border,
+          boxShadow: data.selected
+            ? `0 0 0 2px ${theme.glow}, 0 12px 24px rgba(18, 32, 51, 0.14)`
+            : undefined,
+        }}
       >
-        <span className="mb-1 inline-block rounded-full border border-[#cde1f6] bg-[#f4f9ff] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#3f5e79]">
+        <span
+          className="mb-1 inline-block rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+          style={{
+            borderColor: theme.badgeBorder,
+            background: theme.badgeBg,
+            color: theme.badgeText,
+          }}
+        >
           {roleLabel}
         </span>
         <br />
         <span className="text-sm font-semibold text-[#122033]">{data.label}</span>
-        <div className="pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-t from-[#0e5cb5]/5 to-transparent" />
+        <div className="pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-t from-[#155fd2]/5 to-transparent" />
       </div>
       <Handle
         type="source"
         position={Position.Bottom}
-        className="!h-2.5 !w-2.5 !border-[#0b7a75] !bg-[#0b7a75]"
+        className="!h-2.5 !w-2.5 !border-[#0a7f78] !bg-[#0a7f78]"
       />
     </div>
   );
@@ -165,12 +201,12 @@ export default function CausalGraph({
       target: edge.target,
       animated: edge.animated,
       style: {
-        stroke: "#0b7a75",
+        stroke: edge.animated ? "#0a7f78" : "#2b6fbe",
         strokeWidth: 2,
       },
       markerEnd: {
         type: "arrowclosed" as const,
-        color: "#0b7a75",
+        color: edge.animated ? "#0a7f78" : "#2b6fbe",
         width: 20,
         height: 20,
       },
@@ -239,12 +275,12 @@ export default function CausalGraph({
         attributionPosition="bottom-left"
         proOptions={{ hideAttribution: true }}
       >
-        <Background color="#d7e4f0" gap={22} size={1} />
+        <Background color="#ceddec" gap={22} size={1} />
         <Controls position="bottom-right" showInteractive={false} />
         <MiniMap
           position="bottom-left"
-          nodeColor="#0f766e"
-          maskColor="rgba(245, 240, 230, 0.75)"
+          nodeColor="#0a7f78"
+          maskColor="rgba(236, 243, 252, 0.86)"
           pannable
           zoomable
         />

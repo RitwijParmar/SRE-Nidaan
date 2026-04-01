@@ -810,15 +810,32 @@ export default function DashboardPage() {
     }
     return "border-rose-200 bg-rose-50 text-rose-700";
   };
+  const readinessChecks = [
+    incidentSignal.trim().length >= 12,
+    incidentImpact.trim().length >= 12,
+    incidentChange.trim().length >= 10,
+    affectedServices.length > 0,
+    incidentSummary.trim().length >= 32,
+  ];
+  const readinessPercent = Math.round(
+    (readinessChecks.filter(Boolean).length / readinessChecks.length) * 100
+  );
+  const canAnalyze = incidentSummary.trim().length >= 32;
+  const readinessToneClass =
+    readinessPercent >= 80
+      ? "border-emerald-200 bg-emerald-50/70 text-emerald-800"
+      : readinessPercent >= 50
+        ? "border-amber-200 bg-amber-50/75 text-amber-800"
+        : "border-rose-200 bg-rose-50/75 text-rose-800";
 
   return (
     <div className="nidaan-shell min-h-screen text-nidaan-ink">
       <div className="nidaan-glow nidaan-glow-left" />
       <div className="nidaan-glow nidaan-glow-right" />
 
-      <header className="sticky top-0 z-50 border-b border-nidaan-border/70 bg-[#f4f9ff]/95 backdrop-blur-lg">
+      <header className="sticky top-0 z-50 border-b border-nidaan-border/70 bg-[#eef4fb]/95 backdrop-blur-lg">
         <div className="mx-auto w-full max-w-[1400px] px-4 py-4 lg:px-6">
-          <div className="nidaan-card flex flex-col gap-4 border border-nidaan-border/80 bg-gradient-to-r from-white to-[#f2f8ff] px-4 py-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="nidaan-card flex flex-col gap-4 border border-nidaan-border/80 bg-gradient-to-r from-white to-[#eef6ff] px-4 py-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-start gap-3">
             <img
               src="/sre-nidaan-mark.svg"
@@ -827,50 +844,55 @@ export default function DashboardPage() {
             />
             <div>
               <h1 className="nidaan-display text-2xl font-semibold text-nidaan-ink md:text-[31px]">
-                SRE निदान Command Deck
+                SRE निदान
               </h1>
               <p className="text-sm font-medium text-nidaan-accent-strong">
-                घटना विश्लेषण · सुरक्षित हस्तक्षेप · विश्वसनीय संचालन
+                Incident Command Workspace · सुरक्षित हस्तक्षेप
               </p>
               <p className="text-sm text-nidaan-muted">
-                Incident diagnosis with evidence-backed causal reasoning and human safety control.
+                Evidence-backed incident diagnosis with human-in-the-loop safety control.
               </p>
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              id="analyze-incident-btn"
-              onClick={analyzeIncident}
-              disabled={loading}
-              className="rounded-xl bg-gradient-to-r from-nidaan-accent to-nidaan-accent-strong px-4 py-2.5 text-sm font-semibold text-white shadow-md shadow-nidaan-accent/35 transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-55"
-            >
-              {loading ? "Analyzing..." : "Analyze Incident"}
-            </button>
-            {loading && (
+          <div className="flex flex-col items-start gap-2 lg:items-end">
+            <div className="flex flex-wrap items-center gap-2">
               <button
-                onClick={stopAnalysis}
-                className="rounded-xl border border-nidaan-danger/35 bg-nidaan-danger/10 px-3 py-2 text-sm font-semibold text-nidaan-danger transition hover:bg-nidaan-danger/15"
+                id="analyze-incident-btn"
+                onClick={analyzeIncident}
+                disabled={loading || !canAnalyze}
+                className="rounded-xl bg-gradient-to-r from-nidaan-accent to-nidaan-accent-strong px-4 py-2.5 text-sm font-semibold text-white shadow-md shadow-nidaan-accent/35 transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-55"
               >
-                Stop
+                {loading ? "Analyzing..." : "Analyze Incident"}
               </button>
-            )}
-            <button
-              onClick={() => {
-                void (async () => {
-                  try {
-                    const payload = await refreshRuntime();
-                    await runIntegrationCheck(payload);
-                  } catch {
-                    // status banner already updated in refreshRuntime
-                  }
-                })();
-              }}
-              disabled={refreshingRuntime || checkingIntegration}
-              className="rounded-xl border border-nidaan-border bg-white px-3 py-2 text-sm font-semibold text-nidaan-ink transition hover:border-nidaan-accent/40 hover:text-nidaan-accent disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {refreshingRuntime || checkingIntegration ? "Checking..." : "Check System"}
-            </button>
+              {loading && (
+                <button
+                  onClick={stopAnalysis}
+                  className="rounded-xl border border-nidaan-danger/35 bg-nidaan-danger/10 px-3 py-2 text-sm font-semibold text-nidaan-danger transition hover:bg-nidaan-danger/15"
+                >
+                  Stop
+                </button>
+              )}
+              <button
+                onClick={() => {
+                  void (async () => {
+                    try {
+                      const payload = await refreshRuntime();
+                      await runIntegrationCheck(payload);
+                    } catch {
+                      // status banner already updated in refreshRuntime
+                    }
+                  })();
+                }}
+                disabled={refreshingRuntime || checkingIntegration}
+                className="rounded-xl border border-nidaan-border bg-white px-3 py-2 text-sm font-semibold text-nidaan-ink transition hover:border-nidaan-accent/40 hover:text-nidaan-accent disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {refreshingRuntime || checkingIntegration ? "Checking..." : "Check System"}
+              </button>
+            </div>
+            <p className={`rounded-full border px-3 py-1 text-xs font-semibold ${readinessToneClass}`}>
+              Incident readiness {readinessPercent}% {canAnalyze ? "· ready to run" : "· add more detail"}
+            </p>
           </div>
           </div>
         </div>
@@ -1047,11 +1069,36 @@ export default function DashboardPage() {
               className="mt-4 w-full rounded-2xl border border-nidaan-border bg-white p-3 text-sm leading-relaxed text-nidaan-ink outline-none transition focus:border-nidaan-accent/45 focus:ring-2 focus:ring-nidaan-accent/15"
               placeholder="Generate from the fields above, then edit this final brief before analysis."
             />
+            <div className="mt-4 rounded-2xl border border-nidaan-border bg-[#f8fbff] p-3">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-nidaan-muted">
+                  Readiness Checklist
+                </p>
+                <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${readinessToneClass}`}>
+                  {readinessPercent}%
+                </span>
+              </div>
+              <div className="mt-2 h-2 overflow-hidden rounded-full bg-[#deebf7]">
+                <div
+                  className={`h-full rounded-full transition-all ${
+                    readinessPercent >= 80
+                      ? "bg-nidaan-success"
+                      : readinessPercent >= 50
+                        ? "bg-nidaan-warning"
+                        : "bg-nidaan-danger"
+                  }`}
+                  style={{ width: `${readinessPercent}%` }}
+                />
+              </div>
+              <p className="mt-2 text-xs text-nidaan-muted">
+                Complete signal, impact, change context, services, and final brief before running analysis.
+              </p>
+            </div>
           </article>
 
           <article className="nidaan-card p-5">
             <div className="mb-2 flex items-center justify-between">
-              <h2 className="nidaan-display text-lg font-semibold text-nidaan-ink">2. System Status</h2>
+              <h2 className="nidaan-display text-lg font-semibold text-nidaan-ink">2. Runtime Readiness</h2>
               <span className="nidaan-chip">live status</span>
             </div>
             <div className="space-y-2 text-sm text-nidaan-muted">
@@ -1075,7 +1122,7 @@ export default function DashboardPage() {
           </article>
 
           <article className="nidaan-card p-5">
-            <h2 className="nidaan-display text-lg font-semibold text-nidaan-ink">3. Guided Flow</h2>
+            <h2 className="nidaan-display text-lg font-semibold text-nidaan-ink">3. Guided Workflow</h2>
             <div className="mt-3 space-y-2 text-sm text-nidaan-muted">
               <p><span className="nidaan-mono text-nidaan-ink">A.</span> Click <strong>Analyze Incident</strong>.</p>
               <p><span className="nidaan-mono text-nidaan-ink">B.</span> Review cause, graph, and evidence summary.</p>
@@ -1087,7 +1134,7 @@ export default function DashboardPage() {
 
         <section className="space-y-5 xl:col-span-8">
           <article id="causal-graph-workspace" className="nidaan-card overflow-hidden">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-nidaan-border/80 bg-white/80 px-5 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-nidaan-border/80 bg-gradient-to-r from-white to-[#eef6ff] px-5 py-3">
               <h2 className="nidaan-display text-lg font-semibold text-nidaan-ink">Causal Graph Workspace</h2>
               {loading ? (
                 <span className="rounded-full border border-nidaan-warning/30 bg-nidaan-warning/10 px-2 py-1 nidaan-mono text-[11px] text-nidaan-warning">
@@ -1140,7 +1187,7 @@ export default function DashboardPage() {
                       </div>
                     )}
                   </div>
-                  <aside className="flex h-full flex-col gap-3 bg-[#f8fbff] p-4">
+                  <aside className="flex h-full flex-col gap-3 bg-[#f3f8ff] p-4">
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-wide text-nidaan-muted">
                         Graph Inspector
@@ -1216,9 +1263,9 @@ export default function DashboardPage() {
                 </div>
               ) : (
                 <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
-                  <div className="nidaan-display text-4xl text-nidaan-accent/35">Causal Graph</div>
+                  <div className="nidaan-display text-4xl text-nidaan-accent/35">Incident Graph</div>
                   <p className="max-w-md text-sm text-nidaan-muted">
-                    Your graph workspace will show connected causes, impact path, and evidence-linked nodes.
+                    Run analysis to visualize causal links, impact flow, and evidence-backed node traces.
                   </p>
                 </div>
               )}
