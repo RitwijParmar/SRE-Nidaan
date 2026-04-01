@@ -15,7 +15,21 @@ const nextConfig = {
   },
 
   async redirects() {
-    return [];
+    const canonicalHost = process.env.NEXT_PUBLIC_CANONICAL_HOST;
+    const aliasHost = process.env.NEXT_PUBLIC_BIND_ALIAS_HOST;
+
+    if (!canonicalHost || !aliasHost) {
+      return [];
+    }
+
+    return [
+      {
+        source: "/:path*",
+        has: [{ type: "host", value: aliasHost }],
+        destination: `https://${canonicalHost}/:path*`,
+        permanent: false,
+      },
+    ];
   },
 
   async rewrites() {

@@ -13,6 +13,8 @@ HF_PRODUCTION_REPO_ID="${HF_PRODUCTION_REPO_ID:-ritwijar/SRE-Nidaan-Production}"
 PRODUCTION_ARTIFACT_LABEL="${PRODUCTION_ARTIFACT_LABEL:-checkpoint-1064}"
 BRAIN_STARTUP_PROBE="${BRAIN_STARTUP_PROBE:-timeoutSeconds=240,periodSeconds=240,failureThreshold=10,tcpSocket.port=8000}"
 FACE_BUILD_API_URL="${FACE_BUILD_API_URL:-}"
+CANONICAL_FACE_HOST="${CANONICAL_FACE_HOST:-sre-nidaan-122722888597.us-east4.run.app}"
+BIND_ALIAS_HOST="${BIND_ALIAS_HOST:-sre-nidaan-face-122722888597.us-east4.run.app}"
 
 if [[ ! -x "$GCLOUD_BIN" ]]; then
   echo "gcloud CLI not found at $GCLOUD_BIN" >&2
@@ -62,7 +64,7 @@ fi
 
 "$GCLOUD_BIN" builds submit \
   --config deploy/gcp/cloudbuild.yaml \
-  --substitutions=_REGION="${REGION}",_REPO="${ARTIFACT_REPO}",_TAG="${TAG}",_NEXT_PUBLIC_API_URL="${FACE_BUILD_API_URL}"
+  --substitutions=_REGION="${REGION}",_REPO="${ARTIFACT_REPO}",_TAG="${TAG}",_NEXT_PUBLIC_API_URL="${FACE_BUILD_API_URL}",_NEXT_PUBLIC_CANONICAL_HOST="${CANONICAL_FACE_HOST}",_NEXT_PUBLIC_BIND_ALIAS_HOST="${BIND_ALIAS_HOST}"
 
 "$GCLOUD_BIN" run deploy sre-nidaan-brain \
   --image "$BRAIN_IMAGE" \
@@ -110,7 +112,7 @@ BODY_URL="$("$GCLOUD_BIN" run services describe sre-nidaan-body --region "$REGIO
   --memory 512Mi \
   --max-instances 3 \
   --timeout 300 \
-  --set-env-vars "NEXT_PUBLIC_API_URL=${BODY_URL}"
+  --set-env-vars "NEXT_PUBLIC_API_URL=${BODY_URL},NEXT_PUBLIC_CANONICAL_HOST=${CANONICAL_FACE_HOST},NEXT_PUBLIC_BIND_ALIAS_HOST=${BIND_ALIAS_HOST}"
 
 FACE_URL="$("$GCLOUD_BIN" run services describe sre-nidaan-face --region "$REGION" --format='value(status.url)')"
 
