@@ -28,3 +28,5 @@ feedback/
 presentations/_raw_recordings/
 presentations/*Voiceover*.aiff
 presentations/*Voiceover*.m4a
+presentations/*Voiceover*.mp3
+presentations/_frame_checks/

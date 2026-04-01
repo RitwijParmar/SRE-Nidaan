@@ -1,31 +1,22 @@
-Welcome to SRE Nidaan.
-This quick demo shows exactly how to use it during an incident.
+Hi, welcome to SRE Nidaan.
+Let me walk you through the exact workflow an on-call engineer can follow during an incident.
 
-Step one.
-Start with incident context.
-Fill the primary signal, customer impact, recent change context, and affected services.
-You can also select a preset to speed things up.
+First, click Check System to confirm runtime health.
+Then pick a preset, for example Auth Retry Storm, so we can start from realistic context quickly.
 
-Step two.
-Build or edit the final incident brief, then click Analyze Incident.
-The system runs grounded reasoning, not just a generic text response.
+Next, review the final incident brief.
+Edit it in plain language with what changed, what users are seeing, and what systems look saturated.
+Once the brief is clear, click Analyze Incident.
 
-Step three.
-Review the output in three parts:
-root cause, intervention logic, and the causal graph.
-Use the graph inspector to check upstream and downstream relations before acting.
+Now we wait for grounded analysis.
+When the result is ready, open the Causal Graph Workspace and inspect how failures propagated across services.
+This is where you validate upstream and downstream dependencies before taking action.
 
-Step four.
-Move to safety approval.
-If you want to proceed, provide a clear reason and authorize intervention.
-This keeps action human-gated and auditable.
+After that, move to Safety Approval.
+Write why the intervention is safe, then authorize with a human decision gate.
 
-Step five.
-Submit analyst feedback.
-Mark useful or add corrections so future responses improve.
+Finally, submit analyst feedback.
+Mark the result useful or add a correction so future incident responses keep improving.
 
-Under the hood, SRE Nidaan uses QLoRA SFT, reward modeling, and RLHF,
-with an MCP-inspired tool layer for controlled telemetry calls.
-
-That is the full flow:
+That is the full loop in SRE Nidaan:
 describe, analyze, verify, authorize, and improve.

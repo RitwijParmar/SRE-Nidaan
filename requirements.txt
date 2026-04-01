@@ -25,3 +25,9 @@ pydantic>=2.7.0
 
 # Evaluation
 numpy>=1.26.0
+
+# Demo generation
+playwright>=1.44.0
+moviepy>=1.0.3
+imageio-ffmpeg>=0.4.9
+edge-tts>=7.2.0
