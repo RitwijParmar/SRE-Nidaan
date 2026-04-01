@@ -154,7 +154,7 @@ const INCIDENT_PRESETS = [
 
 const NETWORK_TIMEOUT_MS = 12000;
 const REFUTATION_TIMEOUT_MS = 5000;
-const ANALYZE_TIMEOUT_MS = 45000;
+const ANALYZE_TIMEOUT_MS = 40000;
 
 function prettifyLabel(value: string): string {
   return value.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
@@ -310,10 +310,9 @@ function ensureRenderableIncidentResult(payload: IncidentResult): IncidentResult
 }
 
 export default function DashboardPage() {
-  const configuredBodyBase = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/$/, "");
-  const BODY_BASE = configuredBodyBase || "/body";
+  const BODY_BASE = "/body";
   const API_BASE = "/api";
-  const DIRECT_API_BASE = configuredBodyBase ? `${configuredBodyBase}/api` : API_BASE;
+  const DIRECT_API_BASE = API_BASE;
   const TENANT_ID = (process.env.NEXT_PUBLIC_TENANT_ID || "default-tenant").trim();
   const [result, setResult] = useState<IncidentResult | null>(null);
   const [health, setHealth] = useState<HealthPayload | null>(null);
@@ -1184,7 +1183,7 @@ export default function DashboardPage() {
                     {analysisStage || "Running causal analysis..."}
                   </p>
                   <p className="max-w-md text-xs text-nidaan-muted">
-                    First response may take up to 45 seconds. Use <span className="nidaan-mono">Stop</span> to cancel the in-flight request.
+                    First response may take up to 40 seconds during model warm-up. Use <span className="nidaan-mono">Stop</span> to cancel the in-flight request.
                   </p>
                 </div>
               ) : graphResult ? (

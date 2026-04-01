@@ -54,6 +54,16 @@ def _env_int(name: str, default: int, minimum: int, maximum: int) -> int:
         return default
 
 
+def _env_float(name: str, default: float, minimum: float, maximum: float) -> float:
+    raw_value = os.environ.get(name)
+    if raw_value is None:
+        return default
+    try:
+        return max(minimum, min(maximum, float(raw_value)))
+    except ValueError:
+        return default
+
+
 def _env_bool(name: str, default: bool) -> bool:
     raw_value = os.environ.get(name)
     if raw_value is None:
@@ -99,6 +109,7 @@ ALLOWED_ORIGINS = _env_csv(
 DEFAULT_CANDIDATE_COUNT = _env_int("GENERATION_CANDIDATES", 3, 1, 8)
 DEFAULT_GROUNDING_LIMIT = _env_int("GROUNDING_EVIDENCE_LIMIT", 4, 1, 8)
 GENERATION_MAX_TOKENS = _env_int("GENERATION_MAX_TOKENS", 512, 96, 1024)
+LIVE_ANALYSIS_TIMEOUT_SECONDS = _env_float("LIVE_ANALYSIS_TIMEOUT_SECONDS", 18.0, 2.0, 120.0)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("sre-nidaan-body")
@@ -128,6 +139,8 @@ app.add_middleware(
 async def enforce_api_security(request: Request, call_next):
     path = request.url.path
     if path.startswith("/api/"):
+        if request.method == "OPTIONS":
+            return await call_next(request)
         tenant_id = request.headers.get("x-tenant-id", "").strip()
         if REQUIRE_TENANT_ID and not tenant_id:
             return JSONResponse(
@@ -617,6 +630,33 @@ def _candidate_count(requested: int | None) -> int:
     return max(1, min(8, requested))
 
 
+def _analysis_structure_is_viable(payload: dict[str, Any]) -> bool:
+    nodes = payload.get("dag_nodes")
+    edges = payload.get("dag_edges")
+    if not isinstance(nodes, list) or not isinstance(edges, list):
+        return False
+    if len(nodes) < 3 or len(edges) < 2:
+        return False
+
+    node_ids = {
+        str(item.get("id"))
+        for item in nodes
+        if isinstance(item, dict) and item.get("id")
+    }
+    if len(node_ids) < 3:
+        return False
+
+    valid_edges = 0
+    for edge in edges:
+        if not isinstance(edge, dict):
+            continue
+        source = str(edge.get("source", "")).strip()
+        target = str(edge.get("target", "")).strip()
+        if source and target and source in node_ids and target in node_ids:
+            valid_edges += 1
+    return valid_edges >= 2
+
+
 def _feedback_log_file() -> Path:
     path = Path(FEEDBACK_LOG_PATH)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -799,19 +839,34 @@ async def analyze_incident(
             )
     else:
         try:
-            live_candidates = await _generate_candidate_analyses(
-                user_content,
-                candidate_count=candidate_count,
-            )
+            try:
+                live_candidates = await asyncio.wait_for(
+                    _generate_candidate_analyses(
+                        user_content,
+                        candidate_count=candidate_count,
+                    ),
+                    timeout=LIVE_ANALYSIS_TIMEOUT_SECONDS,
+                )
+            except asyncio.TimeoutError as exc:
+                raise TimeoutError(
+                    f"live inference exceeded {LIVE_ANALYSIS_TIMEOUT_SECONDS:.1f}s budget"
+                ) from exc
             candidate_payloads = [candidate.model_dump() for candidate in live_candidates]
             selected_payload, verifier_data, selected_candidate_index = select_best_candidate(
                 candidate_payloads,
                 telemetry=telemetry,
                 grounding_evidence=grounding_evidence_payload,
             )
-            if selected_candidate_index < 0 or not verifier_data["accepted"]:
+            structure_viable = _analysis_structure_is_viable(selected_payload)
+            if (
+                selected_candidate_index < 0
+                or not verifier_data["accepted"]
+                or not structure_viable
+            ):
                 used_fallback = True
                 source = "grounded-fallback"
+                if not structure_viable:
+                    logger.info("Selected live candidate failed structural DAG checks; using grounded fallback.")
                 selected_payload = build_grounded_fallback_analysis(
                     telemetry,
                     grounding_evidence=grounding_evidence_payload,
@@ -1098,6 +1153,7 @@ async def health() -> dict[str, Any]:
         "default_candidate_count": DEFAULT_CANDIDATE_COUNT,
         "generation_max_tokens": GENERATION_MAX_TOKENS,
         "vllm_request_timeout_seconds": VLLM_REQUEST_TIMEOUT_SECONDS,
+        "live_analysis_timeout_seconds": LIVE_ANALYSIS_TIMEOUT_SECONDS,
         "vllm_max_retries": VLLM_MAX_RETRIES,
         "mcp_tools_registered": len(MCP_ROUTER.list_tools()),
         "telemetry_source_url": TELEMETRY_SOURCE_URL or "simulated-static",

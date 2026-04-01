@@ -1,3 +1,4 @@
+import asyncio
 import tempfile
 import unittest
 from pathlib import Path
@@ -76,6 +77,81 @@ class BackendRuntimeTests(unittest.TestCase):
         self.assertFalse(payload["generation_metadata"]["llm_reachable"])
         self.assertTrue(payload["generation_metadata"]["used_fallback"])
         self.assertEqual(mocked_generate.await_count, 0)
+
+    def test_analyze_incident_falls_back_when_selected_candidate_has_invalid_dag(self) -> None:
+        weak_candidate = backend_main.CausalAnalysisResponse(
+            root_cause="auth_service:96% CPU; database:990/1000",
+            intervention_simulation="scale_up_auth_service:5->20 replicas",
+            recommended_action="rate_limit_frontend:1000 req/s",
+            dag_nodes=[],
+            dag_edges=[],
+        )
+        forced_verifier = {
+            "accepted": True,
+            "score": 0.9,
+            "evidence_overlap": 4,
+            "telemetry_overlap": 4,
+            "generic_penalty": 0.0,
+            "panic_scaling_penalty": 0.0,
+            "reasons": ["accepted"],
+        }
+        with patch.object(
+            backend_main,
+            "_brain_ready_for_inference",
+            new=AsyncMock(return_value=True),
+        ), patch.object(
+            backend_main,
+            "_generate_candidate_analyses",
+            new=AsyncMock(return_value=[weak_candidate]),
+        ), patch.object(
+            backend_main,
+            "select_best_candidate",
+            return_value=(weak_candidate.model_dump(), forced_verifier, 0),
+        ), patch.object(
+            backend_main,
+            "_run_refutation_background",
+            new=AsyncMock(return_value=None),
+        ):
+            response = self.client.post(
+                "/api/analyze-incident",
+                json={"incident_summary": "Auth retry storm with DB saturation."},
+                headers={"x-tenant-id": "test-tenant"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["generation_metadata"]["source"], "grounded-fallback")
+        self.assertTrue(payload["generation_metadata"]["used_fallback"])
+        self.assertGreaterEqual(len(payload["analysis"]["dag_nodes"]), 3)
+        self.assertGreaterEqual(len(payload["analysis"]["dag_edges"]), 2)
+
+    def test_analyze_incident_falls_back_when_live_generation_times_out(self) -> None:
+        with patch.object(
+            backend_main,
+            "_brain_ready_for_inference",
+            new=AsyncMock(return_value=True),
+        ), patch.object(
+            backend_main,
+            "_generate_candidate_analyses",
+            new=AsyncMock(side_effect=asyncio.TimeoutError()),
+        ), patch.object(
+            backend_main,
+            "_run_refutation_background",
+            new=AsyncMock(return_value=None),
+        ):
+            response = self.client.post(
+                "/api/analyze-incident",
+                json={"incident_summary": "Auth retries surge while DB reaches saturation."},
+                headers={"x-tenant-id": "test-tenant"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["generation_metadata"]["source"], "grounded-fallback")
+        self.assertTrue(payload["generation_metadata"]["used_fallback"])
+        self.assertFalse(payload["generation_metadata"]["llm_reachable"])
+        self.assertGreaterEqual(len(payload["analysis"]["dag_nodes"]), 3)
+        self.assertGreaterEqual(len(payload["analysis"]["dag_edges"]), 2)
 
     def test_feedback_endpoint_appends_jsonl_record(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
