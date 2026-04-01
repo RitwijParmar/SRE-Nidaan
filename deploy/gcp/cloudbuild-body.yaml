@@ -1,0 +1,17 @@
+substitutions:
+  _REGION: us-east4
+  _REPO: sre-nidaan
+  _TAG: manual
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - backend/Dockerfile
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/sre-nidaan-body:${_TAG}
+      - .
+
+images:
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/sre-nidaan-body:${_TAG}

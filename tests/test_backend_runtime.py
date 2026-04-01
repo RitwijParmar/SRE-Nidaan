@@ -49,6 +49,34 @@ class BackendRuntimeTests(unittest.TestCase):
         self.assertGreaterEqual(len(payload["grounding_evidence"]), 1)
         self.assertIn("manual review", payload["analysis"]["recommended_action"].lower())
 
+    def test_analyze_incident_skips_llm_when_brain_not_ready(self) -> None:
+        mocked_generate = AsyncMock(return_value=[])
+        with patch.object(
+            backend_main,
+            "_brain_ready_for_inference",
+            new=AsyncMock(return_value=False),
+        ), patch.object(
+            backend_main,
+            "_generate_candidate_analyses",
+            new=mocked_generate,
+        ), patch.object(
+            backend_main,
+            "_run_refutation_background",
+            new=AsyncMock(return_value=None),
+        ):
+            response = self.client.post(
+                "/api/analyze-incident",
+                json={"incident_summary": "Auth retries with DB saturation."},
+                headers={"x-tenant-id": "test-tenant"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["generation_metadata"]["source"], "grounded-fallback")
+        self.assertFalse(payload["generation_metadata"]["llm_reachable"])
+        self.assertTrue(payload["generation_metadata"]["used_fallback"])
+        self.assertEqual(mocked_generate.await_count, 0)
+
     def test_feedback_endpoint_appends_jsonl_record(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             feedback_path = Path(temp_dir) / "analyst_feedback.jsonl"

@@ -691,6 +691,16 @@ async def _probe_json_url(url: str, timeout_seconds: float = 6.0) -> tuple[bool,
     return await asyncio.to_thread(_fetch)
 
 
+async def _brain_ready_for_inference() -> bool:
+    brain_health_url = _to_brain_health_url(VLLM_ENDPOINT)
+    brain_ok, brain_payload = await _probe_json_url(brain_health_url, timeout_seconds=2.0)
+    if not brain_ok:
+        return False
+
+    status_value = str((brain_payload or {}).get("status", "")).strip().lower()
+    return status_value in {"ready", "online", "healthy", "ok"}
+
+
 async def _generate_candidate_analyses(
     user_content: str,
     *,
@@ -761,42 +771,13 @@ async def analyze_incident(
     selected_candidate_index = -1
     used_fallback = False
     source = "live-candidate"
+    llm_ready = await _brain_ready_for_inference()
 
-    try:
-        live_candidates = await _generate_candidate_analyses(
-            user_content,
-            candidate_count=candidate_count,
-        )
-        candidate_payloads = [candidate.model_dump() for candidate in live_candidates]
-        selected_payload, verifier_data, selected_candidate_index = select_best_candidate(
-            candidate_payloads,
-            telemetry=telemetry,
-            grounding_evidence=grounding_evidence_payload,
-        )
-        if selected_candidate_index < 0 or not verifier_data["accepted"]:
-            used_fallback = True
-            source = "grounded-fallback"
-            selected_payload = build_grounded_fallback_analysis(
-                telemetry,
-                grounding_evidence=grounding_evidence_payload,
-            )
-            verifier_data = score_candidate_analysis(
-                selected_payload,
-                telemetry=telemetry,
-                grounding_evidence=grounding_evidence_payload,
-            )
-        analysis = CausalAnalysisResponse.model_validate(selected_payload)
-        logger.info(
-            "Analysis selected: source=%s selected_candidate_index=%s score=%s",
-            source,
-            selected_candidate_index,
-            verifier_data["score"],
-        )
-    except Exception as exc:
+    if not llm_ready:
         llm_reachable = False
         used_fallback = True
         source = "grounded-fallback"
-        logger.warning("vLLM unreachable or invalid (%s) - using grounded fallback.", exc)
+        logger.info("Brain not ready for inference; returning grounded fallback immediately.")
         fallback_payload = build_grounded_fallback_analysis(
             telemetry,
             grounding_evidence=grounding_evidence_payload,
@@ -816,6 +797,61 @@ async def analyze_incident(
                 telemetry=telemetry,
                 grounding_evidence=grounding_evidence_payload,
             )
+    else:
+        try:
+            live_candidates = await _generate_candidate_analyses(
+                user_content,
+                candidate_count=candidate_count,
+            )
+            candidate_payloads = [candidate.model_dump() for candidate in live_candidates]
+            selected_payload, verifier_data, selected_candidate_index = select_best_candidate(
+                candidate_payloads,
+                telemetry=telemetry,
+                grounding_evidence=grounding_evidence_payload,
+            )
+            if selected_candidate_index < 0 or not verifier_data["accepted"]:
+                used_fallback = True
+                source = "grounded-fallback"
+                selected_payload = build_grounded_fallback_analysis(
+                    telemetry,
+                    grounding_evidence=grounding_evidence_payload,
+                )
+                verifier_data = score_candidate_analysis(
+                    selected_payload,
+                    telemetry=telemetry,
+                    grounding_evidence=grounding_evidence_payload,
+                )
+            analysis = CausalAnalysisResponse.model_validate(selected_payload)
+            logger.info(
+                "Analysis selected: source=%s selected_candidate_index=%s score=%s",
+                source,
+                selected_candidate_index,
+                verifier_data["score"],
+            )
+        except Exception as exc:
+            llm_reachable = False
+            used_fallback = True
+            source = "grounded-fallback"
+            logger.warning("vLLM unreachable or invalid (%s) - using grounded fallback.", exc)
+            fallback_payload = build_grounded_fallback_analysis(
+                telemetry,
+                grounding_evidence=grounding_evidence_payload,
+            )
+            verifier_data = score_candidate_analysis(
+                fallback_payload,
+                telemetry=telemetry,
+                grounding_evidence=grounding_evidence_payload,
+            )
+            try:
+                analysis = CausalAnalysisResponse.model_validate(fallback_payload)
+            except Exception:
+                source = "mock-analysis"
+                analysis = get_mock_analysis()
+                verifier_data = score_candidate_analysis(
+                    analysis.model_dump(),
+                    telemetry=telemetry,
+                    grounding_evidence=grounding_evidence_payload,
+                )
 
     analysis_id = f"analysis-{uuid4().hex[:12]}"
     result = IncidentAnalysisResult(
